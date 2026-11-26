@@ -190,3 +190,13 @@ with residuals in 40-place arithmetic) put this solve 1e-9 to 7e-9 and QZ 1e-9 t
 equation having condition numbers of 1e10 to 1e13. Elsewhere this solve is less accurate than QZ at 40 to 80 variables: 1e-10
 to 1e-9 away from the exact answer where QZ was 4e-12 to 9e-11, with residuals about 50 times larger. That is far below what
 estimation can notice, and one Newton step did not reliably improve it, so it is recorded rather than fixed.
+
+**36. The Kalman filter recomputes each period's step when taking derivatives, instead of storing its intermediate
+matrices.** Reverse-mode derivatives through the filter kept about seven n × n matrices per period per particle. Evidence (XLA's
+own memory estimate of the compiled program): for 50 states, 150 periods and SMC's default 2,000 particles, the gradient needed
+43 GB of working memory, more than this machine's 30 GB, so estimating a model of DSGE size would have failed. With
+`jax.checkpoint` on the period step it needs 6.5 GB (one covariance per period, plus a little). Time was unchanged at 20 and 50
+states (4.66 s against 4.68 s, 4.31 s against 4.28 s for a batch of gradients) and 7% slower on the 2-state toy; gradients
+agreed to 1e-13 relative. A fast test checks the compiled program's memory so this cannot silently return. The alternative,
+evaluating particles in smaller batches, would bound memory too, but it lives in the sampler and leaves each gradient's
+memory as large.

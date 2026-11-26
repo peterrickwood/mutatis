@@ -53,7 +53,10 @@ def kalman_filter(y: Float[Array, "t k"], m0: Float[Array, " n"], P0: Float[Arra
         m_new, P_new, log_lik = _update(m_pred, P_pred, jnp.where(seen, y_t, 0.0), seen, Z, H, d_t, n)
         return (m_new, P_new), (log_lik, m_pred, P_pred, m_new, P_new)
 
-    _, (log_lik, m_pred, P_pred, m_filt, P_filt) = jax.lax.scan(step, (m0, P0), (y, c, d))
+    # jax.checkpoint: for derivatives, each period's step is recomputed in the backward pass instead of keeping its intermediate
+    # matrices, which cuts memory about 7-fold (43 GB to 6.5 GB for 50 states, 150 periods, 2,000 particles) at no measurable
+    # cost in time (decisions log, 36).
+    _, (log_lik, m_pred, P_pred, m_filt, P_filt) = jax.lax.scan(jax.checkpoint(step), (m0, P0), (y, c, d))
     return Filtered(jnp.sum(log_lik), log_lik, m_pred, P_pred, m_filt, P_filt)
 
 

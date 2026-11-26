@@ -116,6 +116,19 @@ def test_stationary_covariance_near_the_unit_circle(radius):
     assert np.max(np.abs(X - expected)) < 1e3 * np.finfo(float).eps / (1 - radius**2) * scale
 
 
+def test_gradient_memory_stays_near_one_covariance_per_period():
+    # Reverse mode keeps what the backward pass needs from every period. Kept naively that was about 7 matrices of n x n per
+    # period per particle (43 GB for 50 states, 150 periods and 2,000 particles); recomputing each period's step in the backward
+    # pass keeps only the state mean and covariance carried between periods. Checked on the compiled program, without running it.
+    n, k, t, particles = 20, 5, 150, 100
+    model = random_model(np.random.default_rng(0), n=n, k=k, t=t)
+    log_lik = lambda T: kalman_filter(**{**as_jax(model), "T": T}).log_likelihood
+    Ts = jnp.broadcast_to(jnp.asarray(model["T"]), (particles, n, n))
+    compiled = jax.jit(jax.vmap(jax.grad(log_lik))).lower(Ts).compile()
+    one_covariance_per_period = t * particles * n * n * 8
+    assert compiled.memory_analysis().temp_size_in_bytes < 2 * one_covariance_per_period
+
+
 # At moderate sizes, against statsmodels (medium tier) -------------------------------------------------------------------------
 
 def simulated_model(rng, n, k, t, missing, exact, noise_rank):
