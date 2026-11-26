@@ -27,6 +27,7 @@ dev = [
     "pytest>=9",
     "hypothesis>=6",
     "statsmodels>=0.14",
+    "beartype>=0.18",
 ]
 
 [tool.setuptools.packages.find]

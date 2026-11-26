@@ -4,3 +4,7 @@ Imports nothing else from mutatis except the JAX settings.
 """
 
 from mutatis import _jax_config  # noqa: F401  (64-bit floats before any JAX use)
+
+from mutatis.dist.distributions import (Beta, Distribution, Flat, Gamma, HalfNormal, InverseGamma, InverseWishart, MultivariateNormal, Normal, StudentT,
+                                        Uniform, UniformOrthogonal)
+from mutatis.dist.domains import Domain, Interval, Orthogonal, Positive, PositiveDefinite, Real, UnitInterval
