@@ -11,7 +11,7 @@ from tests.infer.targets import NormalMean, TwoPeaks
 def test_smoke():
     target = NormalMean(np.random.default_rng(0).normal(size=(20, 2)))
     result = smc(target, jax.random.key(0), n_particles=200)
-    assert result.temperatures[-1] == 1.0 and np.isfinite(result.log_marginal_likelihood)
+    assert result.diagnostics["temperatures"][-1] == 1.0 and np.isfinite(result.log_marginal_likelihood)
     assert np.isclose(result.weights.sum(), 1.0)
 
 

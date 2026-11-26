@@ -10,10 +10,8 @@ likelihood, which comparing versions needs.
 Between steps the moves are retuned: the step size from the acceptance rate, and the scale of each unknown from the particles'
 spread. Built on BlackJAX's adaptive tempered SMC; this module drives its loop and does the retuning.
 
-Results carry weights. Summaries must use them, or call `resample` for equally weighted draws.
+Results carry weights. Summaries must use them (`Posterior.mean`, `Posterior.sd`), or `Posterior.resample` for equally weighted draws.
 """
-
-from dataclasses import dataclass
 
 import blackjax
 import jax
@@ -22,34 +20,15 @@ import numpy as np
 from blackjax.smc import adaptive_tempered, resampling
 
 from mutatis import _jax_config  # noqa: F401
+from mutatis.infer.posterior import Posterior
 
 
 class SMCError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True)
-class SMCResult:
-    particles: np.ndarray        # (particles, unknowns), unconstrained
-    weights: np.ndarray          # sum to one
-    log_marginal_likelihood: float
-    temperatures: tuple[float, ...]
-    acceptance: tuple[float, ...]
-
-    def resample(self, key, n: int | None = None) -> np.ndarray:
-        n = len(self.weights) if n is None else n
-        index = jax.random.choice(key, len(self.weights), (n,), p=jnp.asarray(self.weights))
-        return self.particles[np.asarray(index)]
-
-    def mean(self) -> np.ndarray:
-        return np.average(self.particles, axis=0, weights=self.weights)
-
-    def sd(self) -> np.ndarray:
-        return np.sqrt(np.average((self.particles - self.mean()) ** 2, axis=0, weights=self.weights))
-
-
 def smc(problem, key, n_particles: int = 2000, n_mcmc_steps: int = 10, n_leapfrog: int = 10, target_ess: float = 0.5,
-        target_acceptance: float = 0.65, initial_step_size: float = 0.5, max_steps: int = 1000) -> SMCResult:
+        target_acceptance: float = 0.65, initial_step_size: float = 0.5, max_steps: int = 1000) -> Posterior:
     """Sample a posterior problem (contract 2: `draw_prior`, `log_prior`, `log_likelihood`)."""
     key_prior, key_steps = jax.random.split(key)
     particles = jax.vmap(problem.draw_prior)(jax.random.split(key_prior, n_particles))
@@ -78,7 +57,8 @@ def smc(problem, key, n_particles: int = 2000, n_mcmc_steps: int = 10, n_leapfro
         acceptance.append(rate)
     else:
         raise SMCError(f"the temperature reached only {float(state.tempering_param):.3g} after {max_steps} steps")
-    return SMCResult(np.asarray(state.particles), np.asarray(state.weights), log_evidence, tuple(temperatures), tuple(acceptance))
+    return Posterior(np.asarray(state.particles), np.asarray(state.weights), log_evidence, "smc",
+                     {"temperatures": tuple(temperatures), "acceptance": tuple(acceptance)})
 
 
 def _weighted_variance(particles, weights):

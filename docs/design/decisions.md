@@ -84,3 +84,12 @@ to the largest variance.
 
 **19. The stationary covariance uses a fixed 60 doubling steps instead of a loop that stops when settled.** JAX cannot
 differentiate backwards through a loop whose length depends on the data, and gradient samplers need these derivatives.
+
+**20. Choosing a sampler:** sequential Monte Carlo when every prior is proper; the exact regression formula when a prior is
+improper (flat or Jeffreys) and the model qualifies; otherwise an error that says why. SMC cannot start from an improper prior,
+because it draws from it.
+
+**21. Whether the exact regression formula applies is checked numerically on the model, not inferred from its kind.** The checks:
+shocks read off the data; one-step-ahead errors exactly linear in the flat-prior coefficients (compared at a second random
+point); every coefficient used by exactly one series' error; every series using the same regressors; the errors' covariance equal
+to the one covariance parameter. This keeps the formula free of any notion of "VAR" while covering VARs and SVARs.
