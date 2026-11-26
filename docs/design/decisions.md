@@ -50,3 +50,15 @@ block, so it belongs to the model, not to one block.
 **11. Compiled equations are evaluated by walking the syntax tree inside JAX, not by generating code.** JAX traces the walk once
 when a function is compiled, so there is no cost per evaluation, and the same tree serves for evaluation, derivatives (by
 automatic differentiation) and counting equations.
+
+**12. Solved models carry their own noise: the shock and measurement-error distributions, built for the parameter values.**
+Contract 1 then answers everything estimation needs from one object, including the optional abilities "linear" and "normal
+noise" that select the Kalman filter.
+
+**13. Whether shocks and measurement errors are normal with mean zero is decided from the specification's text, before any
+parameter values exist.** `normal(0, sigma)` qualifies; `normal(m, sigma)` with a parameter m does not, even if m happens to
+be zero. The choice of method must not depend on a parameter value, or it could change during estimation.
+
+**14. Starting distribution, for now:** the `initial` priors if every variable has one (they must be normal for now); otherwise
+the long-run distribution, when every shock is normal and the model has no outside variables; otherwise none, and estimation
+must start from the data. Giving `initial` for some variables but not others is an error.

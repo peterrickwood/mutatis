@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 import scipy.stats as ss
 
+from tests.helpers import assert_covariance_matches, assert_mean_matches
 from mutatis.dist import (Beta, Flat, Gamma, HalfNormal, InverseGamma, InverseWishart, MultivariateNormal, Normal, PositiveDefinite, StudentT, Uniform,
                           UniformOrthogonal)
 
@@ -29,12 +30,6 @@ SCALAR_CASES = [
 IDS = [type(d).__name__ for d, _ in SCALAR_CASES]
 
 
-def _assert_mean_matches(draws, true_mean):
-    draws = np.asarray(draws)
-    standard_error = draws.std(axis=0, ddof=1) / np.sqrt(draws.shape[0])
-    np.testing.assert_array_less(np.abs(draws.mean(axis=0) - true_mean), 5 * standard_error)
-
-
 @pytest.mark.parametrize("dist, reference", SCALAR_CASES, ids=IDS)
 def test_log_prob_matches_scipy(dist, reference):
     inside = POINTS[(POINTS > reference.support()[0]) & (POINTS < reference.support()[1])]
@@ -51,7 +46,7 @@ def test_log_prob_outside_domain_is_minus_infinity(dist, x):
 def test_sample_mean(dist, reference):
     draws = dist.sample(jax.random.key(0), (N_DRAWS,))
     assert draws.shape == (N_DRAWS,)
-    _assert_mean_matches(draws, reference.mean())
+    assert_mean_matches(draws, reference.mean())
 
 
 @pytest.mark.parametrize("cls, mean, sd", [(Gamma, 1.5, 0.4), (Beta, 0.7, 0.1), (InverseGamma, 0.5, 0.2)])
@@ -68,9 +63,8 @@ def test_multivariate_normal():
     x = jnp.array([[0.0, 0.0, 0.0], [1.0, -1.0, 2.0]])
     np.testing.assert_allclose(dist.log_prob(x), ss.multivariate_normal(mean, cov).logpdf(np.asarray(x)), rtol=1e-12)
     draws = dist.sample(jax.random.key(1), (N_DRAWS,))
-    _assert_mean_matches(draws, np.asarray(mean))
-    centred = np.asarray(draws - mean)
-    _assert_mean_matches((centred[:, :, None] * centred[:, None, :]).reshape(N_DRAWS, -1), np.asarray(cov).ravel())  # covariance = mean of products
+    assert_mean_matches(draws, np.asarray(mean))
+    assert_covariance_matches(draws, mean, cov)
 
 
 def test_inverse_wishart():
@@ -80,7 +74,7 @@ def test_inverse_wishart():
     np.testing.assert_allclose(dist.log_prob(x), ss.invwishart(df, np.asarray(scale)).logpdf(np.asarray(x)), rtol=1e-12)
     draws = dist.sample(jax.random.key(2), (N_DRAWS,))
     assert bool(jnp.all(jax.vmap(PositiveDefinite().contains)(draws[:100])))
-    _assert_mean_matches(draws.reshape(N_DRAWS, -1), np.asarray(scale).ravel() / (df - 2 - 1))
+    assert_mean_matches(draws.reshape(N_DRAWS, -1), np.asarray(scale).ravel() / (df - 2 - 1))
 
 
 def test_uniform_orthogonal():
@@ -88,8 +82,8 @@ def test_uniform_orthogonal():
     draws = UniformOrthogonal(n).sample(jax.random.key(3), (N_DRAWS,))
     np.testing.assert_allclose(jnp.einsum("kji,kjl->kil", draws, draws), jnp.broadcast_to(jnp.eye(n), draws.shape), atol=1e-12)
     # Under the even distribution every entry squared has mean 1/n, and both signs of the determinant are equally likely.
-    _assert_mean_matches(draws[:, 0, 0] ** 2, 1 / n)
-    _assert_mean_matches(np.sign(np.linalg.det(np.asarray(draws))), 0.0)
+    assert_mean_matches(draws[:, 0, 0] ** 2, 1 / n)
+    assert_mean_matches(np.sign(np.linalg.det(np.asarray(draws))), 0.0)
     assert float(UniformOrthogonal(n).log_prob(draws[0])) == 0.0
     assert float(UniformOrthogonal(n).log_prob(draws[0] * 1.01)) == -np.inf
 

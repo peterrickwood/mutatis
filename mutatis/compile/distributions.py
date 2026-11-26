@@ -49,7 +49,11 @@ class DistributionSpec:
 
     @property
     def gaussian(self) -> bool:
-        return self.family in ("normal", "multivariate_normal")
+        """Normal with mean zero, known before any parameter values: what the Kalman filter needs of shocks and measurement errors."""
+        if self.family not in ("normal", "multivariate_normal"):
+            return False
+        location = self.arguments.get("loc", self.arguments.get("mean"))
+        return location is None or (isinstance(location, Num) and float(location.value) == 0.0)
 
     def build(self, params: dict):
         args = {name: _value(expr, params, self.shape) for name, expr in self.arguments.items()}
@@ -90,11 +94,6 @@ class DistributionSpec:
         if isinstance(dist, MultivariateNormal):
             return dist.cov
         return jnp.diag(jnp.broadcast_to(jnp.asarray(dist.scale) ** 2, self.shape).reshape(-1))
-
-    def mean_is_zero(self, params: dict) -> bool:
-        dist = self.build(params)
-        mean = dist.mean if isinstance(dist, MultivariateNormal) else dist.loc
-        return bool(jnp.all(jnp.asarray(mean) == 0))
 
 
 def _value(expr: Expr, params: dict, shape):
