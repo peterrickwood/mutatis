@@ -22,6 +22,7 @@ Under construction: stage 0 (foundations) is built and stage 1 (Read's SVAR) is 
 - [README.md](README.md) — what mutatis is: the concepts and the framework choices. No planning or staging goes in it.
 - [PLAN.md](PLAN.md) — the implementation plan and staging, with the status of each stage.
 - [docs/design/decisions.md](docs/design/decisions.md) — decisions taken during implementation, each with its reason and alternative.
+- [docs/design/parked.md](docs/design/parked.md) — questions set aside in discussion, to come back to.
 
 Anything those documents mark as *proposed* or list as an open question is undecided — ask rather than assume.
 

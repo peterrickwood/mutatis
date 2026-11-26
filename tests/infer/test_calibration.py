@@ -1,4 +1,4 @@
-"""Calibration of the samplers (medium tier): over many simulated data sets, the truth must fall in the posterior as often as the
+"""Calibration of the samplers: over many simulated data sets, the truth must fall in the posterior as often as the
 posterior says it should.
 
 For SMC and NUTS, simulation-based calibration (Talts and others, 2018): draw the unknowns from the prior, simulate data, sample
@@ -13,6 +13,9 @@ Student t distributions with 196 and 197 degrees of freedom here).
 Uniformity is judged by the Kolmogorov-Smirnov test for each unknown separately (positions of different unknowns from the same
 data set are not independent), failing below p = 0.001 divided by the number of unknowns. Seeds are fixed, so each test is
 deterministic.
+
+Tiers: SMC and NUTS are medium (about 2 minutes together); the exact regression formula is slow (about 11 minutes, because it
+builds and compiles a new problem for each of its 150 data sets).
 """
 
 import jax
@@ -28,9 +31,6 @@ from mutatis.infer.smc import smc
 from mutatis.spec import edits as e
 from tests.infer.test_routes import PARAMS, setup
 from tests.spec.fixtures import toy
-
-pytestmark = pytest.mark.medium
-
 
 class MeanAndScale:
     """y(i) ~ N(mu, sigma^2) for i = 1..10, with mu ~ N(0, 1) and sigma ~ HalfNormal(1). Unknowns z = (mu, log sigma)."""
@@ -64,6 +64,7 @@ def _uniform(positions, name):
     assert min(p) > 1e-3 / len(p)
 
 
+@pytest.mark.medium
 def test_smc_is_calibrated():
     rng, positions = np.random.default_rng(0), []
     for replication in range(100):
@@ -73,6 +74,7 @@ def test_smc_is_calibrated():
     _uniform(positions, "SMC")
 
 
+@pytest.mark.medium
 def test_nuts_is_calibrated():
     rng, positions = np.random.default_rng(1), []
     for replication in range(100):
@@ -82,6 +84,7 @@ def test_nuts_is_calibrated():
     _uniform(positions, "NUTS")
 
 
+@pytest.mark.slow
 def test_exact_regression_is_calibrated():
     flat = [e.SetPrior("dynamics.c", prior="flat"), e.SetPrior("dynamics.B", prior="flat"), e.SetPrior("dynamics.Sigma", prior="jeffreys")]
     model = toy("two_variable")

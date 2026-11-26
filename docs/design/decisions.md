@@ -238,3 +238,12 @@ experiments, recorded in the audit report; 100 unknowns and one seed unless stat
 Nothing is changed in SMC: every fix tried helps one case and not another, and the remaining choices (full covariance mass
 matrices, regularising the per-unknown scales, a number of moves set by a measure of mixing, or NUTS for these problems) change
 every SMC result and need a decision.
+
+**39. The Kalman filter's covariance update: switch from the Joseph form to the standard form only if the standard form
+passes checks with exactly observed series (agreed in discussion 2026-11-26; check under way).** The audit found that the
+standard update makes likelihood gradients 1.6 to 1.7 times faster at 20 to 50 states. The Joseph form is in use because it keeps
+the covariance positive semi-definite when some series are observed exactly, where the standard form can lose that through
+rounding. So the switch is made only if, on cases with exactly observed series, singular state noise, roots near the unit circle
+and long samples, the standard form keeps the covariance valid and gives the same likelihood and gradients as the Joseph form.
+Otherwise the Joseph form stays. Revisit if exactly observed series ever give an invalid covariance or a likelihood that differs
+from the reference. Alternative: keep the Joseph form and accept the slower gradients.
