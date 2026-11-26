@@ -278,7 +278,11 @@ Shortcuts are chosen automatically, never by the person writing the model. If an
 
 The Kalman filter is the standard tool in this field, and for many models it will be the route actually taken. But it is an optimisation of one case, not part of the definition of the framework.
 
-**Models that can only be simulated** (their step can be run, but the probability of a particular step cannot be evaluated) fall outside both of the above. They need the shocks averaged out by simulation (a particle filter) or estimation by matching summary statistics. See [Which models fit](#which-models-fit).
+**Models that can only be simulated** fall outside both of the above. Their step is a program that makes a very large number of internal random draws and reports only a few totals. Take an agent-based labour market with 10,000 households. Each quarter the program draws which workers lose their jobs, which job-seekers meet which firms, and which meetings end in a hire. Then it reports one number, the unemployment rate. The probability of that reported rate has no formula: it would mean adding up over every combination of individual outcomes that gives the same rate.
+
+In principle the general route still applies: treat every internal draw as an unknown. In practice it does not, for three reasons. There are millions of such draws, not about a thousand. Many of them are yes-or-no events, which have no gradient. And the rules that link them (thresholds, sorting, matching) are not smooth. A simulation with only a few continuous random inputs has none of these problems, and goes through the general route like any other model.
+
+The true cases need the internal randomness averaged out by running many simulated copies side by side (a particle filter), or estimation by matching summary statistics. See [Which models fit](#which-models-fit).
 
 **The contract between a model and its estimation** is deliberately narrow: a function that takes values for the parameters and shocks and returns the logarithm of the joint probability, with exact derivatives. Anything that can estimate from such a function can be plugged in.
 
@@ -287,15 +291,13 @@ The Kalman filter is the standard tool in this field, and for many models it wil
 The sampler is the algorithm that draws from the posterior. No particular one is fixed. It has to meet four requirements:
 
 1. **Cope with several peaks and long flat ridges.** These posteriors often have them (Canova & Sala, 2009; Herbst & Schorfheide, 2014). The most common workflow in the field finds one peak and samples around it, and so can miss the others. For a tool built on comparing versions this matters more than usual: if version A lands on one peak and version B on another, the comparison shows a difference that came from the search, not from the change.
-2. **Produce the marginal likelihood,** the overall probability of the data under a version. Comparing versions needs it.
+2. **Produce the marginal likelihood,** the overall probability of the data under a version. It is the standard basis for comparing versions (but see [Open questions](#open-questions)).
 3. **Use gradients,** because the general route involves hundreds or thousands of unknowns.
 4. **Run in parallel.**
 
 Sequential Monte Carlo is the leading candidate. It starts with thousands of draws spread across the whole prior and brings in the data gradually, so the draws settle wherever the posterior has weight; its internal moves can use gradients; and it gives the marginal likelihood as a by-product.
 
 A quick first look (find a peak, approximate the posterior around it) is useful for fast feedback, provided it is labelled as such.
-
-Gradients are *not* used for stochastic gradient descent. That method exists to avoid computing a loss over millions of data points; here there are a few hundred, the exact gradient is cheap, and gradient descent finds only the nearest peak.
 
 ### When the data cannot decide
 
@@ -320,9 +322,11 @@ Two things to be clear about:
 
 These fit in as special cases:
 
-- A VAR estimated by least squares is the result under a flat prior.
-- Maximum likelihood is the peak of the posterior under a flat prior.
+- A VAR estimated by least squares corresponds to a flat prior on its coefficients: the posterior for the coefficients is centred on the least-squares estimate, and its intervals match the classical ones.
+- Maximum likelihood is the peak of the posterior when every prior is flat.
 - An SVAR's restrictions are priors with all their weight on the restricted values.
+
+"Flat" needs care. No probability distribution is uniform over all numbers, so a flat prior is not a real prior. It is shorthand for what happens as a real prior is made wider and wider, and it gives a sensible answer only when the data alone pin the unknown down. It also cannot be drawn from, and the marginal likelihood is not defined under it. In mutatis, "flat" therefore means one of two things: a model simple enough that the answer is known exactly without sampling, or a very wide real prior.
 
 Two limits to this, stated plainly:
 
@@ -400,6 +404,7 @@ The web app does two things.
 - **What a user writes.** The equations that must hold (as in Dynare), or each agent's objective and constraints, from which the system derives the equations (as in gEcon)? The second makes "change the household's preferences" a one-line edit but is much harder to build.
 - **Who the user is.** Researchers who are happy to write equations, or analysts who expect to click? This decides how much the web app has to do without help.
 - **Classical methods.** Whether to offer classical tests and confidence intervals, or stay strictly Bayesian.
+- **How versions are compared.** The marginal likelihood is the standard measure, but it depends on how wide the priors are. Widen a prior that the data already overwhelm, and the estimates barely move while the marginal likelihood falls. So a comparison between versions can turn on an arbitrary width. Comparing versions by how well each predicts data held back from estimation does not have this problem. Which of the two should be the default, or whether to show both, is open.
 - **How much speed generality costs.** The general estimation route is slower than the shortcuts where those apply, and has many more unknowns for the sampler to handle. How much slower, for models of realistic size, is not yet known.
 
 ## Prior art
