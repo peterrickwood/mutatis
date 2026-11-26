@@ -68,6 +68,7 @@ An **edit** is one entry from a fixed list. Each takes a specification and retur
 | `add_data`, `remove_data` | a data link |
 | `add_block`, `remove_block` | a block |
 | `replace_block` | a block, by another with the same inputs and outputs |
+| `replace_equation` | one equation inside a block, keeping the block's inputs and outputs **(Added: MARTIN; agreed)** |
 | `extend_set`, `shrink_set` | the elements of a set **(Added: housing)** |
 | `bind`, `untie` | whether several block instances share one parameter **(Added: housing)** |
 
@@ -375,7 +376,7 @@ In this excerpt, the inputs that other parts of MARTIN would supply are outside 
 
 - **Added: `calendar`.** Equation (8) has a dummy for dates before 2008Q2.
 - **Added: name every number that is a modelling choice.** The paper prints 0.5, 0.15, 0.7 and so on as numbers. As bare numbers they could not be relaxed by an edit. Named as fixed parameters, they can. Pure constants such as 100 stay as numbers.
-- **Found: tied coefficients.** `(1 - wage_income_share - alpha1 - alpha2)` ties one coefficient to three others. Written as above, untying it means replacing the equation.
+- **Found: tied coefficients.** `(1 - wage_income_share - alpha1 - alpha2)` ties one coefficient to three others. Untying it is a `replace_equation` edit: the same equation with that coefficient given its own parameter.
 - **Found: `0.3` equals `1 - 0.7`** but is printed separately. Whether to tie the two is a modelling decision the person transcribing has to make, and it changes what a later edit to `smoothing` does.
 - **Found: the exact regression formula does not apply to (8)** for the same reason as toy 4 (`gamma * beta1`). The published coefficients are least-squares estimates, which equal the posterior peak under flat priors. So reproducing them means comparing a peak, not a formula.
 - **Interpretation to check:** "Δ₂LUR" is read as `LUR - LUR(-2)`.
@@ -459,7 +460,7 @@ One format covers all seven cases, with the additions below. Nothing needed a mo
 
 1. **One equation per output, per block.** Each block names the variables its equations determine, and must have exactly that many equations. That makes counting checkable block by block. The cost is that a market-clearing condition has to be assigned to some block, which then "determines" a price or quantity. Agree?
 2. **Naming every number.** Should the convention be that every number that is a modelling choice is a named parameter, as in the MARTIN excerpt, while pure constants such as 100 stay as numbers? The alternative is to leave published numbers bare and accept that they cannot be relaxed by an edit.
-3. **Small changes inside an equation.** Untying MARTIN's `(1 - 0.15 - α1 - α2)` currently means replacing the whole block. Should there also be a `replace_equation` edit for changes like this? I lean yes, since each MARTIN equation is its own block anyway.
+3. **Small changes inside an equation.** *Decided: yes.* There is a `replace_equation` edit, so untying MARTIN's `(1 - 0.15 - α1 - α2)` does not mean replacing the whole block.
 4. **Templates, `extend_set`, `bind` and `untie`.** They make the housing expansion a short list of edits, but they are the most complex part of the format. Keep them in the design now, even though stage 4 is the first to need them?
 5. **The base 2015 model.** Its code does not appear to be public from the RBA. PLAN.md says demonstration 3 has "a published answer on both sides". That may not hold. This does not block stage 0, but before stage 4 we need either the base code from elsewhere, or a different second side.
 
