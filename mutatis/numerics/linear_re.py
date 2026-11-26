@@ -1,0 +1,167 @@
+"""Solving linear models, with and without expectations of the future.
+
+A linear model is written as
+
+    A E[x(t+1)] + B x(t) + C x(t-1) + D e(t) = 0
+
+where x holds every variable and e every shock. Its solution is a rule for stepping forward,
+
+    x(t) = P x(t-1) + Q e(t).
+
+Without expectation terms (A = 0) the rule follows directly: P = -B^-1 C and Q = -B^-1 D (`solve_backward`).
+
+With expectation terms, P must solve the matrix equation A P^2 + B P + C = 0, and the solution wanted is the one that does not
+explode. The equation has 2n roots (n is the number of variables, and roots may be infinite); P carries the n smallest.
+Exactly one non-exploding solution exists when n roots are inside the unit circle and n are outside: the Blanchard-Kahn
+conditions. `solve_forward_looking` counts the roots (`roots`) to check those conditions, and finds P by cyclic reduction, a
+fast iterative method built from matrix products and linear solves (Bini, Latouche and Meini; also used by Dynare).
+
+Derivatives with respect to A, B and C come from differentiating the equation P satisfies (the implicit function theorem), not
+from differentiating the iterations.
+
+Roots within `UNIT_ROOT_MARGIN` of the unit circle count as not exploding, so models with a random walk can be solved.
+"""
+
+import functools
+from typing import NamedTuple
+
+import jax
+import jax.numpy as jnp
+from jaxtyping import Array, Float, Int
+
+from mutatis import _jax_config  # noqa: F401
+from mutatis.numerics.status import Status
+
+UNIT_ROOT_MARGIN = 1e-6
+RESIDUAL_TOLERANCE = 1e-8
+
+
+class LinearSolution(NamedTuple):
+    P: Float[Array, "n n"]
+    Q: Float[Array, "n k"]
+    status: Int[Array, ""]
+
+
+def solve_backward(B: Float[Array, "n n"], C: Float[Array, "n n"], D: Float[Array, "n k"]) -> LinearSolution:
+    """Solve B x(t) + C x(t-1) + D e(t) = 0 for x(t) = P x(t-1) + Q e(t). The answer is unique whether or not it explodes."""
+    lu = jax.scipy.linalg.lu_factor(B)
+    P, Q = -jax.scipy.linalg.lu_solve(lu, C), -jax.scipy.linalg.lu_solve(lu, D)
+    finite = jnp.all(jnp.isfinite(P)) & jnp.all(jnp.isfinite(Q)) & (jnp.min(jnp.abs(jnp.diagonal(lu[0]))) > 0)
+    status = jnp.where(finite, Status.OK, Status.SINGULAR)
+    return _sanitised(P, Q, status)
+
+
+def solve_forward_looking(A: Float[Array, "n n"], B: Float[Array, "n n"], C: Float[Array, "n n"], D: Float[Array, "n k"],
+                          tolerance: float = 1e-13, max_iterations: int = 100) -> LinearSolution:
+    """Solve A E[x(t+1)] + B x(t) + C x(t-1) + D e(t) = 0 for the one solution x(t) = P x(t-1) + Q e(t) that does not explode.
+
+    If there is no such solution, or more than one, `status` says so and P and Q are zero.
+    """
+    P, status = _solve_quadratic(A, B, C, tolerance, max_iterations)
+    status = status.astype(int)
+    M = A @ P + B
+    Q = -jnp.linalg.solve(jnp.where(status == Status.OK, M, jnp.eye(M.shape[0])), D)
+    return _sanitised(P, Q, status)
+
+
+def _sanitised(P, Q, status):
+    ok = status == Status.OK
+    return LinearSolution(jnp.where(ok, P, 0.0), jnp.where(ok, Q, 0.0), status)
+
+
+def cyclic_reduction(A0: Float[Array, "n n"], A1: Float[Array, "n n"], A2: Float[Array, "n n"], tolerance: float = 1e-13,
+                     max_iterations: int = 100) -> tuple[Float[Array, "n n"], jax.Array]:
+    """The solution X of A0 + A1 X + A2 X^2 = 0 whose eigenvalues are the n smallest roots, and whether the iteration settled.
+
+    The iteration settles when the n smallest roots are strictly smaller in size than the others.
+    """
+    scale = jnp.maximum(jnp.maximum(_norm(A0), _norm(A1)), _norm(A2))
+
+    def step(carry):
+        a0, a1, a2, a_hat, iteration, _ = carry
+        s0, s2 = jnp.linalg.solve(a1, a0), jnp.linalg.solve(a1, a2)
+        change = a2 @ s0
+        a1_next = a1 - a0 @ s2 - change
+        a_hat_next = a_hat - change
+        a0_next, a2_next = -a0 @ s0, -a2 @ s2
+        # The answer is built from a_hat, so stop when a_hat stops changing. Its change shrinks like (r_n / r_n+1)^(2^k), where r_n
+        # and r_n+1 are the sizes of the n-th and (n+1)-th roots. Stopping when a0 or a2 alone is small would stop too early when
+        # one shrinks while the other grows.
+        gap = _norm(change) / jnp.maximum(_norm(a_hat_next), scale * jnp.finfo(A0.dtype).eps)
+        return a0_next, a1_next, a2_next, a_hat_next, iteration + 1, gap
+
+    def keep_going(carry):
+        *_, iteration, gap = carry
+        return (gap > tolerance) & (iteration < max_iterations) & jnp.isfinite(gap)
+
+    initial = (A0, A1, A2, A1, jnp.array(0), jnp.array(jnp.finfo(A0.dtype).max, dtype=A0.dtype))  # finite, so the loop starts
+    *_, a_hat, iteration, gap = jax.lax.while_loop(keep_going, step, initial)
+    X = -jnp.linalg.solve(a_hat, A0)
+    settled = (gap <= tolerance) & jnp.all(jnp.isfinite(X))
+    return X, settled
+
+
+def _norm(X):
+    return jnp.max(jnp.sum(jnp.abs(X), axis=0))  # the matrix 1-norm
+
+
+def roots(A: Float[Array, "n n"], B: Float[Array, "n n"], C: Float[Array, "n n"]) -> jax.Array:
+    """All 2n roots of det(r^2 A + r B + C) = 0, with roots at infinity returned as very large numbers. Not differentiated.
+
+    The roots are those of the pencil G - r F, where F = [[0, A], [I, 0]] and G = [[-C, -B], [0, I]]. JAX has no routine for a
+    pencil whose F may be singular, so the shift-and-invert trick is used: with a shift s that is not a root, the eigenvalues m
+    of (G - s F)^-1 F are m = 1 / (r - s), so r = s + 1 / m, and a root at infinity has m = 0.
+    """
+    A, B, C = (jax.lax.stop_gradient(M) for M in (A, B, C))
+    n = A.shape[0]
+    zero, eye = jnp.zeros((n, n)), jnp.eye(n)
+    F = jnp.block([[zero, A], [eye, zero]])
+    G = jnp.block([[-C, -B], [zero, eye]])
+    m = jnp.linalg.eigvals(jnp.linalg.solve(G - _SHIFT * F, F.astype(complex)))
+    return _SHIFT + 1.0 / jnp.where(m == 0, jnp.finfo(A.dtype).tiny, m)
+
+
+_SHIFT = 0.5 + 0.75j  # any number that is not a root; a complex one cannot coincide with a real root
+
+
+def _classify(A, B, C, tolerance, max_iterations):
+    n = A.shape[0]
+    P, settled = cyclic_reduction(C, B, A, tolerance, max_iterations)
+    residual = _norm(A @ P @ P + B @ P + C) / jnp.maximum(jnp.maximum(_norm(A), _norm(B)), _norm(C))
+    inside = jnp.sum(jnp.abs(roots(A, B, C)) < 1.0 + UNIT_ROOT_MARGIN)
+    found = settled & (residual < RESIDUAL_TOLERANCE)
+    status = jnp.where(inside < n, Status.NO_STABLE_SOLUTION,
+                       jnp.where(inside > n, Status.MANY_STABLE_SOLUTIONS, jnp.where(found, Status.OK, Status.NOT_CONVERGED)))
+    return jnp.where(status == Status.OK, P, 0.0), status
+
+
+@functools.partial(jax.custom_jvp, nondiff_argnums=(3, 4))
+def _solve_quadratic(A, B, C, tolerance, max_iterations):
+    P, status = _classify(A, B, C, tolerance, max_iterations)
+    return P, status.astype(A.dtype)
+
+
+@_solve_quadratic.defjvp
+def _solve_quadratic_jvp(tolerance, max_iterations, primals, tangents):
+    # Differentiating A P^2 + B P + C = 0 gives  (A P + B) dP + A dP P = -(dA P^2 + dB P + dC),  a linear equation for dP.
+    A, B, C = primals
+    dA, dB, dC = tangents
+    P, status = _solve_quadratic(A, B, C, tolerance, max_iterations)
+    ok = status == Status.OK
+    n = P.shape[0]
+    K = jnp.where(ok, sylvester_matrix(A @ P + B, A, P), jnp.eye(n * n))
+    right = jnp.where(ok, -(dA @ P @ P + dB @ P + dC), 0.0).ravel()
+    solve = lambda _, b: jnp.linalg.solve(K, b)
+    solve_transposed = lambda _, b: jnp.linalg.solve(K.T, b)
+    dP = jax.lax.custom_linear_solve(lambda v: K @ v, right, solve, solve_transposed).reshape(n, n)
+    return (P, status), (dP, jnp.zeros_like(status))
+
+
+def sylvester_matrix(M: Float[Array, "n n"], A: Float[Array, "n n"], P: Float[Array, "n n"]) -> Float[Array, "nn nn"]:
+    """The matrix of the linear map X -> M X + A X P, acting on X flattened row by row.
+
+    Built densely, so its size grows with n^4. Adequate for models with up to a few dozen variables; larger models need a solver
+    that never forms this matrix.
+    """
+    n = M.shape[0]
+    return jnp.kron(M, jnp.eye(n)) + jnp.kron(A, P.T)

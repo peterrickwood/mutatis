@@ -218,7 +218,7 @@ The editor issues edits from the fixed list. It adds no modelling capability.
 | Risk | Experiment | When |
 |---|---|---|
 | Sampling the shocks as unknowns is too slow or unstable | Time it against the Kalman filter on the hidden-level toy and a three-equation model with 200 periods | Stage 0 |
-| The forward-looking solve cannot be differentiated or run on thousands of parameter values at once. JAX lacks the standard routine, so this is our own code and the largest single piece of numerical risk | On the toy with a known answer: derivatives against finite differences, agreement with SciPy's routine, and 10,000 prior draws that straddle the stable region | Stage 0 |
+| The forward-looking solve cannot be differentiated or run on thousands of parameter values at once. JAX lacks the standard routine, so this is our own code and the largest single piece of numerical risk | On the toy with a known answer: derivatives against finite differences, agreement with SciPy's routine, and 10,000 prior draws that straddle the stable region | Stage 0. **Done 2026-11-26:** all 10,000 draws classified exactly as theory predicts, derivatives match the closed form, 0.25 s for the batch. Cost grows steeply with size (40 variables: 13 ms to solve, 67 ms with derivatives), because derivatives use a dense matrix of size n² by n²; larger models (stage 4) need a solver that never forms it |
 | The specification cannot express what is needed | The paper exercise | Stage 0, step 2 |
 | The search for bounds stops at a local best, not the true one | Many starting points against formula cases and a grid | Stage 1 |
 | Ports are not enough to describe an expansion | Diff the two public Dynare files | Before stage 4 |
