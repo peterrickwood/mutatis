@@ -28,7 +28,7 @@ def test_run_store_reload_and_cache(tmp_path):
     model, dataset = flat_var_and_data()
     first = runs.run(model, dataset, store=tmp_path, n_draws=500)
     assert first.run["method"] == "exact_regression" and first.run["route"] == "read_off"
-    assert {p.name for p in first.folder.iterdir()} == {"spec.yaml", "run.json", "posterior.npz", "summary.json"}
+    assert {p.name for p in first.folder.iterdir()} == {"spec.yaml", "run.json", "posterior.npz", "summary.json", "quantities.npz"}
     again = runs.run(model, dataset, store=tmp_path, n_draws=500)
     assert again.folder == first.folder and again.summary == first.summary   # the same inputs give the stored result
     other_seed = runs.run(model, dataset, store=tmp_path, n_draws=500, seed=1)

@@ -21,7 +21,7 @@ import numpy as np
 
 from mutatis import _jax_config  # noqa: F401
 from mutatis.infer.estimate import estimate
-from mutatis.infer.intervals import robust_credible_interval, shortest_centred_interval
+from mutatis.infer.intervals import bootstrap_standard_errors, robust_credible_interval, shortest_centred_interval
 from mutatis.infer.posterior import Posterior
 from mutatis.infer.regression import regression_posterior
 from mutatis.infer.nuts import nuts
@@ -108,11 +108,37 @@ def _quantity_at(problem, z, quantity):
 
 def compare_with_reference(result: "Result", path: str | Path, reference_draws: int = 1000, standard_errors: float = 5.0,
                            absolute_floor: float = 1e-6) -> list[dict]:
-    """Each statistic in a reference file (quantity, element, statistic, value) against this result's, with a tolerance from
-    sampling error: both are Monte Carlo estimates, from this result's draws and `reference_draws` draws. Means use sd / sqrt(N);
-    the ends of 68% intervals, which are near the 16th and 84th percentiles, use 1.51 sd / sqrt(N), the standard error of those
-    percentiles for a normal distribution."""
+    """Each statistic in a reference file (quantity, element, statistic, value) against this result's.
+
+    Both are Monte Carlo estimates. The standard error of each of this result's statistics is estimated by a bootstrap over its
+    own stored draws; the reference's is the same scaled to its number of draws. The tolerance is `standard_errors` times the
+    standard error of the difference, never below `absolute_floor` (a statistic pinned exactly by a restriction has no spread).
+    """
     import csv
+
+    report = result.run["settings"]["report"]
+    stored = np.load(result.folder / "quantities.npz")
+    errors_cache = {}
+
+    def errors(quantity, statistic):
+        key = (quantity, statistic)
+        if key not in errors_cache:
+            i = report.index(quantity)
+            if f"q{i}" in stored:
+                draws = stored[f"q{i}"]
+                n = len(draws)
+                fn = {"mean": lambda d: d.mean(axis=0),
+                      "ci68_lower": lambda d: [shortest_centred_interval(d[:, j])[0] for j in range(d.shape[1])],
+                      "ci68_upper": lambda d: [shortest_centred_interval(d[:, j])[1] for j in range(d.shape[1])]}[statistic]
+                errors_cache[key] = (bootstrap_standard_errors(fn, [draws]), n)
+            else:
+                lower, upper = stored[f"q{i}_lower"], stored[f"q{i}_upper"]
+                n = len(lower)
+                fn = {"set_mean_lower": lambda lo, up: lo.mean(axis=0), "set_mean_upper": lambda lo, up: up.mean(axis=0),
+                      "robust68_lower": lambda lo, up: [robust_credible_interval(lo[:, j], up[:, j])[0] for j in range(lo.shape[1])],
+                      "robust68_upper": lambda lo, up: [robust_credible_interval(lo[:, j], up[:, j])[1] for j in range(lo.shape[1])]}[statistic]
+                errors_cache[key] = (bootstrap_standard_errors(fn, [lower, upper], reps=50), n)
+        return errors_cache[key]
 
     rows = []
     with open(path, newline="") as handle:
@@ -122,16 +148,11 @@ def compare_with_reference(result: "Result", path: str | Path, reference_draws: 
             if statistic not in ours_all:
                 continue
             ours = ours_all[statistic][element]
-            n = ours_all["draws"]
-            if statistic in ("mean", "ci68_lower", "ci68_upper"):
-                spread = ours_all["sd"][element]
-            else:
-                spread = ours_all["lower_sd" if "lower" in statistic else "upper_sd"][element]
-            factor = 1.0 if statistic in ("mean", "set_mean_lower", "set_mean_upper") else 1.51
-            # A statistic pinned exactly by a restriction (a bound at zero, say) has no spread across draws; allow for rounding only.
-            tolerance = max(standard_errors * factor * spread * np.sqrt(1.0 / n + 1.0 / reference_draws), absolute_floor)
+            se, n = errors(quantity, statistic)
+            difference_se = se[element] * np.sqrt(1.0 + n / reference_draws)   # ours, plus the reference's at its number of draws
+            tolerance = max(standard_errors * difference_se, absolute_floor)
             rows.append({"quantity": quantity, "element": element, "statistic": statistic, "ours": ours, "theirs": theirs,
-                         "tolerance": tolerance, "ok": bool(abs(ours - theirs) <= tolerance + 1e-12)})
+                         "tolerance": tolerance, "ok": bool(abs(ours - theirs) <= tolerance)})
     return rows
 
 
@@ -188,7 +209,21 @@ def run(model: Model, dataset: Dataset, store: str | Path = "results", edits: li
     (folder / "run.json").write_text(json.dumps(record, indent=2, default=str))
     np.savez(folder / "posterior.npz", particles=posterior.particles, weights=posterior.weights)
     (folder / "summary.json").write_text(json.dumps(summary, indent=2))
+    np.savez(folder / "quantities.npz", **_quantity_draws(problem, posterior, key_summary, report))
     return Result(folder, edited, record, summary)
+
+
+def _quantity_draws(problem, posterior, key, report) -> dict:
+    """Per reported quantity (by position in the report): its draws, or the lower and upper bounds of each draw."""
+    out = {}
+    bounds = posterior.diagnostics.get("bounds", {})
+    for i, quantity in enumerate(report):
+        if quantity in bounds:
+            out[f"q{i}_lower"], out[f"q{i}_upper"] = (np.asarray(b) for b in bounds[quantity])
+        else:
+            values = np.asarray(jax.vmap(lambda z: _quantity_at(problem, z, quantity))(_equal_weight_draws(posterior, key)))
+            out[f"q{i}"] = values.reshape(len(values), -1)
+    return out
 
 
 def load_result(folder: str | Path) -> Result:

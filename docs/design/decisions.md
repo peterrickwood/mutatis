@@ -151,3 +151,15 @@ shortest-interval ends.
 and log likelihood functions, prior draws, and a layout of the unknowns, instead of one joint-probability function. This was
 flagged on 2026-11-25 as out of date after the plan changed the contract, and had no answer; it was updated under the instruction
 to decide, document and move on.
+
+**32. Stage 1's test for range results requires our bounds to be exact, not to match Read's published range statistics; this
+changes PLAN.md's acceptance criterion for ranges and needs confirmation.** Evidence (`experiments/read2022_differences.py`):
+under Restriction (2), on 15 posterior draws and 6 horizons, an independent optimiser never found an allowed value outside our
+bounds (largest gap 1.8e-11), while Read's published lower ends at restricted horizons are about 0 where the exact bounds are
+clearly positive (0.276 in one draw for the exchange rate at horizon 2). Since his range numbers are not the exact bounds, they
+cannot be the standard. The comparison with them is still printed for every run, so the size of the difference stays visible.
+
+**33. Comparison tolerances come from a bootstrap over our own stored draws, not a formula.** The formula used before (1.51 sd /
+sqrt(N) for the ends of 68% intervals) understated the noise about threefold: across five seeds, our own interval ends for
+Restriction (3) moved with sd 0.025, 0.022 and 0.016 where the formula said 0.0078, 0.0078 and 0.0059. Draws of every reported
+quantity are now stored with each result (`quantities.npz`) for this.

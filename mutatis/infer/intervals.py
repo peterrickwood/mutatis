@@ -25,3 +25,14 @@ def robust_credible_interval(lower: np.ndarray, upper: np.ndarray, level: float 
     radius = np.percentile(distance, 100 * level, axis=0, method="hazen")
     best = int(np.argmin(radius))
     return float(centres[best] - radius[best]), float(centres[best] + radius[best])
+
+
+def bootstrap_standard_errors(statistic, columns, reps: int = 100, seed: int = 0) -> np.ndarray:
+    """Standard error of `statistic(*columns)` from resampling the draws with replacement: how much it would move with other draws.
+
+    `columns` are arrays with draws along the first axis, resampled together (the lower and upper bounds of one draw stay paired).
+    """
+    rng = np.random.default_rng(seed)
+    n = len(columns[0])
+    values = [statistic(*(c[index] for c in columns)) for index in (rng.integers(0, n, n) for _ in range(reps))]
+    return np.std(np.asarray(values, dtype=float), axis=0, ddof=1)
