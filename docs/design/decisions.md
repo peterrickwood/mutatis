@@ -118,3 +118,31 @@ posterior matched the Kalman route (sigma_eta 0.232 against 0.233), while SMC ga
 20x10 and 50x20 steps. On a 200-dimension normal target SMC's posterior was roughly right but its log marginal likelihood was off
 by +19.7. Standardising the shocks (now done anyway) did not change this. The cost: NUTS does not move between separated peaks
 and gives no marginal likelihood, so versions estimated this way cannot be compared by marginal likelihood until SMC improves.
+
+## Stage 1
+
+**27. Whether ranges can use the exact one-column method is checked by evaluating at rotations only, never by derivatives in
+every direction.** Read's sign normalisation reads a row of the inverse impact matrix, (chol(Sigma) Q)^-1 = Q' chol(Sigma)^-1,
+which depends on one column of Q only because Q is orthogonal. Derivatives with respect to unrestricted changes in Q show it
+depending on every column, which is what the first version of the check did, wrongly refusing Read's model. The check now fits
+each function as linear in one column by least squares at n + 6 random rotations, and verifies the fit at fresh ones.
+
+**28. Read's published range results are exactly zero at some horizons where ours are slightly positive; ours are taken as
+correct.** Under Restriction (1), the set of posterior means for the cash rate's response starts at exactly 0 in Read's figure
+data at horizons 0 to 3; here it starts at 0.0009, 0.0043, 0.0003 and 0.0001. The bounds computed here are exact: each is attained
+by an allowed unit vector (tested), and an independent optimiser (SciPy's SLSQP from 200 starting points) found exactly the same
+minima on every draw checked, for example 0.026 rather than 0 for one draw at horizon 1. Read's `analyticalBounds.m` tests
+`v == 0` with exact floating-point equality where a restricted response's value function is zero in theory but about 1e-17 in
+practice, and then uses a direction computed from rounding noise; it also writes the zero-value case into the slot for no
+active restrictions (`fMax(hh,1,ii)`) inside the loop over active sets. Either could produce exact zeros (moderate confidence;
+MATLAB was not available to step through it). The stage 1 test accepts only this kind of difference, and prints each one.
+
+**29. An edit file may include another (`- include: restriction1.yaml`),** so a restriction set built on another is written as
+"that set plus these", not copied.
+
+**30. Interval summaries follow Read's definitions exactly** (shortest centred interval over the draws; robust credible interval
+on a 1,000-point grid of centres; MATLAB's percentile definition, "hazen" in NumPy), so results can be compared number for number.
+Tolerances for comparing with a reference come from sampling error on both sides; the ends of 68% intervals use the standard
+error of the 16th and 84th percentiles of a normal (1.51 sd / sqrt(N)). Observed on Restriction (1): posterior means agree with
+standardised differences of sd 0.82; interval ends with sd 1.7, which suggests this standard error understates the noise of
+shortest-interval ends.

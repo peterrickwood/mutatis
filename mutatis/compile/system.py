@@ -99,6 +99,7 @@ class System:
     linear: bool
     presample: int                   # periods of data before the first one explained, when starting from the data itself
     model_variables: tuple[str, ...] = field(default=())
+    restrictions: tuple[tuple[str, str, str], ...] = field(default=())   # (name, quantity, requirement), as in the specification
 
     def residual(self, lead, now, lag, shocks, outside, params):
         values = Values(lead, now, lag, shocks, outside, params)
@@ -186,7 +187,8 @@ def compile_model(model: Model) -> System:
                     {label: tuple(_labels(outputs, sets)) for label, outputs in block_outputs.items()}, tuple(observations), tuple(auxiliary_series),
                     initial, dict(reducer.auxiliary), any(_has_expectation(e.expr) for e in equations),
                     all(_degree(e.expr) <= 1 for e in equations) and all(_degree(o.expr) <= 1 for o in observations),
-                    _presample(reducer.auxiliary), model_variables)
+                    _presample(reducer.auxiliary), model_variables,
+                    tuple((name, r.quantity, r.require) for name, r in model.restrictions.items()))
     _count(system)
     return system
 

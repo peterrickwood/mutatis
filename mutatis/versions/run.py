@@ -16,10 +16,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 
 from mutatis import _jax_config  # noqa: F401
 from mutatis.infer.estimate import estimate
+from mutatis.infer.intervals import robust_credible_interval, shortest_centred_interval
 from mutatis.infer.posterior import Posterior
 from mutatis.infer.regression import regression_posterior
 from mutatis.infer.nuts import nuts
@@ -56,13 +58,93 @@ def run_key(model: Model, dataset: Dataset, settings: dict, seed: int) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-def summarise(problem, posterior: Posterior, key) -> dict:
+def summarise(problem, posterior: Posterior, key, report=()) -> dict:
+    summary = _summarise_parameters(problem, posterior, key)
+    summary["quantities"] = _summarise_quantities(problem, posterior, key, report)
+    for name in ("plausibility", "max_rhat", "divergences"):
+        if name in posterior.diagnostics:
+            summary[name] = posterior.diagnostics[name]
+    return summary
+
+
+def _summarise_quantities(problem, posterior, key, report) -> dict:
+    """For each reported quantity, per element: the posterior mean, sd and 68% credible interval; or, when the rotation has no
+    prior, the set of posterior means and the 68% robust credible interval, from the ranges computed with each draw."""
+    out = {}
+    bounds = posterior.diagnostics.get("bounds", {})
+    for quantity in report:
+        if quantity in bounds:
+            lower, upper = (np.asarray(b) for b in bounds[quantity])
+            robust = [robust_credible_interval(lower[:, i], upper[:, i]) for i in range(lower.shape[1])]
+            out[quantity] = {"set_mean_lower": lower.mean(axis=0).tolist(), "set_mean_upper": upper.mean(axis=0).tolist(),
+                             "robust68_lower": [r[0] for r in robust], "robust68_upper": [r[1] for r in robust],
+                             "lower_sd": lower.std(axis=0).tolist(), "upper_sd": upper.std(axis=0).tolist(), "draws": int(len(lower))}
+            continue
+        values = np.asarray(jax.vmap(lambda z: _quantity_at(problem, z, quantity))(_equal_weight_draws(posterior, key)))
+        values = values.reshape(len(values), -1)
+        intervals = [shortest_centred_interval(values[:, i]) for i in range(values.shape[1])]
+        out[quantity] = {"mean": values.mean(axis=0).tolist(), "sd": values.std(axis=0).tolist(), "ci68_lower": [c[0] for c in intervals],
+                         "ci68_upper": [c[1] for c in intervals], "draws": int(len(values))}
+    return out
+
+
+def _equal_weight_draws(posterior, key):
+    if np.allclose(posterior.weights, posterior.weights[0]):
+        return jnp.asarray(posterior.particles)
+    return jnp.asarray(posterior.resample(key, SUMMARY_DRAWS))
+
+
+def _quantity_at(problem, z, quantity):
+    from mutatis.quantities.expressions import Context, evaluate_quantity
+
+    values, _ = problem.layout.constrain(z)
+    params = {k: v for k, v in values.items() if k in problem.system.parameters}
+    data = problem.data
+    first = data.start.first if problem.start == "data" else 0
+    series = {o.series: jnp.asarray(data.observed[first:, i]) for i, o in enumerate(problem.system.observations)}
+    series.update({name: jnp.asarray(v[first:]) for name, v in data.auxiliary.items()})
+    return evaluate_quantity(quantity, Context(problem.system, problem.solve(params), problem.observed, problem.outside, problem.start_state, series))
+
+
+def compare_with_reference(result: "Result", path: str | Path, reference_draws: int = 1000, standard_errors: float = 5.0,
+                           absolute_floor: float = 1e-6) -> list[dict]:
+    """Each statistic in a reference file (quantity, element, statistic, value) against this result's, with a tolerance from
+    sampling error: both are Monte Carlo estimates, from this result's draws and `reference_draws` draws. Means use sd / sqrt(N);
+    the ends of 68% intervals, which are near the 16th and 84th percentiles, use 1.51 sd / sqrt(N), the standard error of those
+    percentiles for a normal distribution."""
+    import csv
+
+    rows = []
+    with open(path, newline="") as handle:
+        for row in csv.DictReader(handle):
+            quantity, element, statistic, theirs = row["quantity"], int(row["element"]), row["statistic"], float(row["value"])
+            ours_all = result.summary["quantities"].get(quantity, {})
+            if statistic not in ours_all:
+                continue
+            ours = ours_all[statistic][element]
+            n = ours_all["draws"]
+            if statistic in ("mean", "ci68_lower", "ci68_upper"):
+                spread = ours_all["sd"][element]
+            else:
+                spread = ours_all["lower_sd" if "lower" in statistic else "upper_sd"][element]
+            factor = 1.0 if statistic in ("mean", "set_mean_lower", "set_mean_upper") else 1.51
+            # A statistic pinned exactly by a restriction (a bound at zero, say) has no spread across draws; allow for rounding only.
+            tolerance = max(standard_errors * factor * spread * np.sqrt(1.0 / n + 1.0 / reference_draws), absolute_floor)
+            rows.append({"quantity": quantity, "element": element, "statistic": statistic, "ours": ours, "theirs": theirs,
+                         "tolerance": tolerance, "ok": bool(abs(ours - theirs) <= tolerance + 1e-12)})
+    return rows
+
+
+def _summarise_parameters(problem, posterior: Posterior, key) -> dict:
     draws = posterior.resample(key, SUMMARY_DRAWS)
     values = jax.vmap(problem.parameters)(draws)
     parameters = {}
     for name, info in problem.system.parameters.items():
         if info.kind == "fixed":
             parameters[name] = {"fixed": np.asarray(info.fixed_value).tolist()}
+            continue
+        if info.kind == "no_prior":
+            parameters[name] = {"no_prior": True}  # its draws are placeholders; its effect is reported as ranges
             continue
         samples = np.asarray(values[name]).reshape(SUMMARY_DRAWS, -1)
         labels = _element_labels(name, info.axes, problem.system.sets)
@@ -82,20 +164,22 @@ def _element_labels(name, axes, sets):
 
 
 def run(model: Model, dataset: Dataset, store: str | Path = "results", edits: list[Edit] = (), seed: int = 0, route: str = "auto",
-        method: str = "auto", **options) -> Result:
+        method: str = "auto", report: tuple[str, ...] = (), **options) -> Result:
     edited = apply_edits(model, edits)
     problem = prepare(edited, dataset, route=route)
     if method == "auto":
         method = "exact_regression" if not problem.proper else "nuts" if problem.route == "sample" else "smc"
     sampler = {"smc": smc, "nuts": nuts, "exact_regression": regression_posterior}[method]
     defaults = {k: v.default for k, v in inspect.signature(sampler).parameters.items() if v.default is not inspect.Parameter.empty}
-    settings = {"route": problem.route, "start": problem.start, "method": method, **defaults, **options}  # every setting, defaults included
+    if method == "exact_regression":
+        options = {**options, "report": tuple(report)}  # ranges are computed draw by draw, so the sampler needs the report
+    settings = {"route": problem.route, "start": problem.start, "method": method, **defaults, **options, "report": list(report)}  # every setting
     folder = Path(store) / run_key(edited, dataset, settings, seed)
     if (folder / "summary.json").exists():
         return load_result(folder)
     key_estimate, key_summary = jax.random.split(jax.random.key(seed))
     posterior = estimate(problem, key_estimate, method=method, **options)
-    summary = summarise(problem, posterior, key_summary)
+    summary = summarise(problem, posterior, key_summary, report)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "spec.yaml").write_text(dump_model(edited))
     record = {"key": folder.name, "model": edited.name, "base_model": model.name, "edits": [e.to_dict() for e in edits],
@@ -143,6 +227,8 @@ def compare(a: Result, b: Result) -> str:
 def _cell(entry) -> str:
     if entry is None:
         return "absent"
+    if "no_prior" in entry:
+        return "no prior: ranges"
     if "fixed" in entry:
         return f"fixed {entry['fixed']}"
     return f"{entry['mean']:.3f} ({entry['sd']:.3f})"

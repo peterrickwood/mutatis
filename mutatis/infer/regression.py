@@ -6,7 +6,8 @@ It applies when the model is, in effect, a set of regressions that all use the s
 - the one-step-ahead errors v(t) = y(t) - E[y(t) | past] are an exact linear function of some coefficients, which have flat
   priors, and every series' error uses the same regressors;
 - the errors' covariance equals one parameter, Sigma, with a Jeffreys or inverse Wishart prior;
-- anything else with a prior has no effect on the likelihood (stage 1 adds these, such as the rotation of an SVAR).
+- anything else has no effect on the likelihood (checked), such as the rotation of an SVAR. Those are drawn from their prior
+  subject to the restrictions, or, with no prior, given ranges (`mutatis.infer.identification`).
 
 Each condition is checked numerically on the model itself, not assumed from what kind of model it is. Then (Zellner; Kadiyala
 and Karlsson) Sigma | data ~ InverseWishart(S + Psi0, T - k + nu0) and the coefficients B | Sigma, data are matrix normal around
@@ -24,8 +25,8 @@ import numpy as np
 
 from mutatis import _jax_config  # noqa: F401
 from mutatis.quantities.recover import recover_shocks
-from mutatis.dist import InverseWishart
-from mutatis.dist.domains import PositiveDefinite, Real
+from mutatis.dist import InverseWishart, UniformOrthogonal
+from mutatis.dist.domains import Orthogonal, PositiveDefinite, Real
 from mutatis.infer.posterior import Posterior
 
 
@@ -43,6 +44,7 @@ class RegressionForm:
     responses: np.ndarray         # (periods, series): the errors when every coefficient is zero
     prior_df: float
     prior_scale: np.ndarray
+    others: tuple = ()            # unknowns the likelihood ignores: drawn from their prior under the restrictions, or given ranges
 
 
 def _errors(problem, values: dict):
@@ -59,13 +61,15 @@ def _errors(problem, values: dict):
 def regression_form(problem) -> RegressionForm:
     if problem.route != "read_off":
         raise NotApplicable("the exact regression formula needs the shocks read off the data")
-    coefficient_units, covariance_units = [], []
+    coefficient_units, covariance_units, other_units = [], [], []
     for unknown in problem.layout.unknowns:
         family = unknown.prior.family if unknown.prior is not None else None
         if family == "flat" and isinstance(unknown.domain, Real):
             coefficient_units.append(unknown)
         elif family in ("jeffreys", "inverse_wishart") and isinstance(unknown.domain, PositiveDefinite):
             covariance_units.append(unknown)
+        elif unknown.no_prior or (unknown.prior is not None and unknown.prior.proper):
+            other_units.append(unknown)  # must not affect the likelihood: checked below
         else:
             raise NotApplicable(f"{unknown.name} has a prior ({family}) that is neither flat on a coefficient nor a covariance prior")
     if len(covariance_units) != 1 or not coefficient_units:
@@ -77,12 +81,13 @@ def regression_form(problem) -> RegressionForm:
 
     sizes = [int(np.prod(u.shape)) for u in coefficient_units]
 
-    def values_for(beta, cov):
+    def values_for(beta, cov, others=None):
         values, start = dict(problem.layout.fixed), 0
         for unit, size in zip(coefficient_units, sizes):
             values[unit.name] = beta[start:start + size].reshape(unit.shape)
             start += size
         values[covariance.name] = cov
+        values.update(others if others is not None else {u.name: _any_value(u, jax.random.key(0)) for u in other_units})
         return values
 
     p = sum(sizes)
@@ -109,11 +114,15 @@ def regression_form(problem) -> RegressionForm:
     if not all(np.allclose(X[:, i, columns[i]], regressors) for i in range(n_series)):
         raise NotApplicable("the series' errors use different regressors")
 
-    # The errors' covariance must be the covariance parameter itself.
-    solved = problem.solve({k: v for k, v in values_for(beta1, cov1).items() if k in problem.system.parameters})
-    form, noise = solved.linear_form(), solved.gaussian_noise()
-    if noise is None or not np.allclose(form.Z @ form.Q @ noise.shock_cov @ (form.Z @ form.Q).T, cov1, rtol=1e-8):
-        raise NotApplicable(f"the errors' covariance is not {covariance.name} itself")
+    # The errors' covariance must be the covariance parameter itself, whatever the other unknowns are.
+    for seed in (1, 2):
+        others = {u.name: _any_value(u, jax.random.key(seed)) for u in other_units}
+        solved = problem.solve({k: v for k, v in values_for(beta1, cov1, others).items() if k in problem.system.parameters})
+        form, noise = solved.linear_form(), solved.gaussian_noise()
+        if noise is None or not np.allclose(form.Z @ form.Q @ noise.shock_cov @ (form.Z @ form.Q).T, cov1, rtol=1e-8):
+            raise NotApplicable(f"the errors' covariance is not {covariance.name} itself")
+        if other_units and not np.allclose(_errors(problem, values_for(beta1, cov1, others)).reshape(-1), errors(beta1, cov1), rtol=1e-10):
+            raise NotApplicable(f"the likelihood depends on {', '.join(u.name for u in other_units)}, so the formula does not apply")
 
     owner = {}
     start = 0
@@ -125,10 +134,24 @@ def regression_form(problem) -> RegressionForm:
     params = {k: v for k, v in values_for(beta1, cov1).items() if k in problem.system.parameters}
     prior = covariance.prior.build(params)
     prior_df, prior_scale = (0.0, np.zeros((n_series, n_series))) if covariance.prior.family == "jeffreys" else (float(prior.df), np.asarray(prior.scale))
-    return RegressionForm(coefficients, covariance.name, regressors, np.asarray(base).reshape(-1, n_series), prior_df, prior_scale)
+    return RegressionForm(coefficients, covariance.name, regressors, np.asarray(base).reshape(-1, n_series), prior_df, prior_scale, tuple(other_units))
 
 
-def regression_posterior(problem, key, n_draws: int = 4000) -> Posterior:
+def _any_value(unit, key):
+    """Some allowed value of an unknown: a draw from its prior, or for a rotation with no prior, a random rotation."""
+    if unit.prior is not None:
+        dist = unit.prior.build({})
+        return dist.sample(key) if dist.event_shape else dist.sample(key, unit.shape)
+    if isinstance(unit.domain, Orthogonal):
+        return UniformOrthogonal(unit.shape[0]).sample(key)
+    raise NotApplicable(f"{unit.name} has no prior and is not a rotation; ranges are only supported for rotations so far")
+
+
+def regression_posterior(problem, key, n_draws: int = 4000, report: tuple[str, ...] = (), max_tries: int = 10_000) -> Posterior:
+    """Exact draws. With unknowns the likelihood ignores, each draw also gets: a value of them drawn from their prior that
+    satisfies the restrictions; or, for a rotation with no prior, the range of every `report` quantity over all allowed rotations.
+    Draws for which nothing satisfies the restrictions are dropped; the share kept is reported as `plausibility`.
+    """
     form = regression_form(problem)
     X, Y = form.regressors, form.responses
     periods, k = X.shape
@@ -140,23 +163,46 @@ def regression_posterior(problem, key, n_draws: int = 4000) -> Posterior:
     if df <= n_series - 1:
         raise NotApplicable(f"too few periods ({periods}) for {k} regressors and {n_series} series")
     scale = residuals.T @ residuals + form.prior_scale
-    key_cov, key_coef = jax.random.split(key)
+    key_cov, key_coef, key_others = jax.random.split(key, 3)
     covariances = InverseWishart(df, jnp.asarray(scale)).sample(key_cov, (n_draws,))
     L_x = np.linalg.cholesky(XtX_inv)
     W = np.asarray(jax.random.normal(key_coef, (n_draws, k, n_series)))
     L_cov = np.linalg.cholesky(np.asarray(covariances))
     B = B_hat + np.einsum("ij,njk,nlk->nil", L_x, W, L_cov)   # B_hat + L_x W L_cov'
-    draws = []
-    for n in range(n_draws):
+
+    def base_values(n):
         values = dict(problem.layout.fixed)
         for unit in problem.layout.unknowns:
-            if unit.name != form.covariance:
+            if unit.name != form.covariance and unit not in form.others:
                 values[unit.name] = np.zeros(unit.shape)
         for name, position, series, regressor in form.coefficients:
             flat = values[name].reshape(-1).copy()
             flat[position] = B[n, regressor, series]
             values[name] = flat.reshape(values[name].shape)
-        values[form.covariance] = covariances[n]
-        draws.append(np.asarray(problem.layout.unconstrain({k: jnp.asarray(v) for k, v in values.items()})))
-    return Posterior(np.stack(draws), np.full(n_draws, 1.0 / n_draws), None, "exact_regression",
-                     {"least_squares": B_hat, "residual_cross_product": residuals.T @ residuals, "regressors": k})
+        values[form.covariance] = np.asarray(covariances[n])
+        return {k: jnp.asarray(v) for k, v in values.items()}
+
+    diagnostics = {"least_squares": B_hat, "residual_cross_product": residuals.T @ residuals, "regressors": k}
+    if not form.others:
+        draws = [np.asarray(problem.layout.unconstrain(base_values(n))) for n in range(n_draws)]
+        return Posterior(np.stack(draws), np.full(n_draws, 1.0 / n_draws), None, "exact_regression", diagnostics)
+
+    from mutatis.infer.restricted import RestrictedOthers  # here to keep the plain case free of the quantity machinery
+
+    others = RestrictedOthers(problem, form.others, report)
+    draws, lower, upper = [], [], []
+    for n, draw_key in zip(range(n_draws), jax.random.split(key_others, n_draws)):
+        result = others.complete(base_values(n), draw_key, max_tries)
+        if result is None:
+            continue
+        values, bounds = result
+        draws.append(np.asarray(problem.layout.unconstrain(values)))
+        if bounds is not None:
+            lower.append(bounds[0])
+            upper.append(bounds[1])
+    if not draws:
+        raise NotApplicable("no draw satisfies the restrictions")
+    diagnostics["plausibility"] = len(draws) / n_draws
+    if lower:
+        diagnostics["bounds"] = others.split(np.stack(lower), np.stack(upper))
+    return Posterior(np.stack(draws), np.full(len(draws), 1.0 / len(draws)), None, "exact_regression", diagnostics)

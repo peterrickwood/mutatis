@@ -1,0 +1,10 @@
+# The data file of Read's replication package. Its series and sources are described in Appendix B of the paper. The file is not
+# stored here: the RBA's licence (CC BY 4.0) excludes third-party material, and the file compiles ABS, US and academic series.
+source:
+  url: https://www.rba.gov.au/publications/rdp/2022/2022-09/rdp-2022-09-supplementary-information.zip
+  sha256: "fcb54cb9c7e1c50b98cc4ed23c0830eeb033cc4528663ceee6c602ff55191665"
+  member: VARData.xlsx
+  sheet: Data
+  date_column: Date
+sample: {first: 1984Q1, last: 2019Q4}
+attribution: "Read, M. (2022), RBA Research Discussion Paper 2022-09, replication files (VARData.xlsx)."

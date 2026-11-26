@@ -1,0 +1,4 @@
+# Restriction (3): in the policy equation the coefficients on GDP and CPI are non-positive, and the cash rate rises on impact.
+- add_restriction: {name: rule_output, restriction: {quantity: "shock_equation(eps[policy], y[gdp])", require: "<= 0"}}
+- add_restriction: {name: rule_prices, restriction: {quantity: "shock_equation(eps[policy], y[cpi])", require: "<= 0"}}
+- add_restriction: {name: cash_rate_rises_on_impact, restriction: {quantity: "response(y[cash_rate], eps[policy], horizons=0)", require: ">= 0"}}

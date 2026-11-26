@@ -88,6 +88,21 @@ def edit_from_dict(value: dict) -> Edit:
     return cls(**args)
 
 
+def load_edit_file(path) -> list[Edit]:
+    """A YAML list of edits. An item `{include: other.yaml}` stands for that file's edits, read relative to this one."""
+    import yaml
+    from pathlib import Path
+
+    path = Path(path)
+    out: list[Edit] = []
+    for item in yaml.safe_load(path.read_text()) or []:
+        if isinstance(item, dict) and set(item) == {"include"}:
+            out += load_edit_file(path.parent / item["include"])
+        else:
+            out.append(edit_from_dict(item))
+    return out
+
+
 def apply_edits(model: Model, edits) -> Model:
     for edit in edits:
         model = edit.apply(model)

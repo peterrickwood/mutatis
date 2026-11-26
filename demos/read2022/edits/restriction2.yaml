@@ -1,0 +1,3 @@
+# Restriction (2): Restriction (1), and the exchange rate does not fall either.
+- include: restriction1.yaml
+- add_restriction: {name: currency_rises, restriction: {quantity: "response(y[twi], eps[policy], horizons=0..3)", require: ">= 0"}}

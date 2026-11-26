@@ -1,0 +1,3 @@
+# Restriction (1): after a positive monetary policy shock, the cash rate does not fall and the CPI does not rise, for a year.
+- add_restriction: {name: cash_rate_rises, restriction: {quantity: "response(y[cash_rate], eps[policy], horizons=0..3)", require: ">= 0"}}
+- add_restriction: {name: prices_fall, restriction: {quantity: "response(y[cpi], eps[policy], horizons=0..3)", require: "<= 0"}}

@@ -1,0 +1,41 @@
+# Read (2022), "Estimating the Effects of Monetary Policy in Australia Using Sign-restricted Structural Vector
+# Autoregressions", RBA Research Discussion Paper 2022-09. The VAR: four variables, four lags, a constant, and three outside
+# variables entering now and with four lags. Flat priors on the coefficients and the Jeffreys prior on the covariance give the
+# normal-inverse-Wishart posterior Read uses. Only the first shock (monetary policy) is identified, by the restrictions in edits/.
+model: read-2022-svar
+time: quarterly
+sets:
+  series:       [cash_rate, gdp, cpi, twi]
+  outside:      [tot, us_gdp, us_rate]
+  shocks:       [policy, other1, other2, other3]
+  lags:         1..4
+  outside_lags: 0..4
+
+blocks:
+  economy:
+    inputs:  ["x[outside]"]
+    outputs: ["y[series]"]
+    parameters:
+      c:     {shape: [series], prior: flat}
+      B:     {shape: [lags, series, series], prior: flat}
+      D:     {shape: [outside_lags, series, outside], prior: flat}
+      Sigma: {shape: [series, series], domain: positive_definite, prior: jeffreys}
+      Q:     {shape: [series, shocks], domain: orthogonal, prior: uniform}   # how forecast errors split into shocks
+    shocks:
+      "eps[shocks]": "normal(0, 1)"
+    equations:
+      - "y = c + sum(l in lags: B[l] @ y(-l)) + sum(l in outside_lags: D[l] @ x(-l)) + chol(Sigma) @ Q @ eps"
+
+data:
+  CASH:  {observes: "y[cash_rate]"}
+  GDP:   {observes: "y[gdp]", transform: "100 * log(x)"}
+  CPI:   {observes: "y[cpi]", transform: "100 * log(x)"}
+  TWI:   {observes: "y[twi]", transform: "100 * log(x)"}
+  TOT:   {feeds: "x[tot]", transform: "100 * log(x)"}
+  USGDP: {feeds: "x[us_gdp]", transform: "100 * log(x)"}
+  FFR:   {feeds: "x[us_rate]"}
+  PROXY: {}
+
+restrictions:
+  # The sign normalisation: the policy equation's own coefficient on the cash rate is non-negative (a11 >= 0 in the paper).
+  normalisation: {quantity: "shock_equation(eps[policy], y[cash_rate])", require: ">= 0"}

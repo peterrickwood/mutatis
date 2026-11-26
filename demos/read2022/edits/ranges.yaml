@@ -1,0 +1,2 @@
+# Read's second kind of result: no prior on the rotation, so results are ranges over everything the restrictions allow.
+- set_prior: {target: economy.Q, prior: none}

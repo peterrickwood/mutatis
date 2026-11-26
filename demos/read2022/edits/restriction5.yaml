@@ -1,0 +1,5 @@
+# Restriction (5): the responses of Restriction (2) and the policy-equation coefficients of Restriction (4).
+- include: restriction2.yaml
+- add_restriction: {name: rule_output, restriction: {quantity: "shock_equation(eps[policy], y[gdp])", require: "<= 0"}}
+- add_restriction: {name: rule_prices, restriction: {quantity: "shock_equation(eps[policy], y[cpi])", require: "<= 0"}}
+- add_restriction: {name: rule_currency, restriction: {quantity: "shock_equation(eps[policy], y[twi])", require: ">= 0"}}

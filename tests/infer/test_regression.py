@@ -47,7 +47,7 @@ def test_draws_have_the_textbook_moments():
 
 def test_proper_coefficient_priors_are_not_this_case():
     problem, _ = flat_var(edits=[e.SetPrior("dynamics.Sigma", prior="jeffreys")])
-    with pytest.raises(NotApplicable, match="neither flat"):
+    with pytest.raises(NotApplicable, match="flat priors"):
         regression_form(problem)
 
 

@@ -1,0 +1,5 @@
+# What Read reports: the responses of the four variables to a one-standard-deviation monetary policy shock, for five years.
+- "response(y[cash_rate], eps[policy], horizons=0..20)"
+- "response(y[gdp], eps[policy], horizons=0..20)"
+- "response(y[cpi], eps[policy], horizons=0..20)"
+- "response(y[twi], eps[policy], horizons=0..20)"

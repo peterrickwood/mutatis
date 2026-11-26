@@ -1,0 +1,3 @@
+# Restriction (4): Restriction (3), and the coefficient on the exchange rate is non-negative.
+- include: restriction3.yaml
+- add_restriction: {name: rule_currency, restriction: {quantity: "shock_equation(eps[policy], y[twi])", require: ">= 0"}}

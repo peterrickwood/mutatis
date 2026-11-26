@@ -57,7 +57,7 @@ class Dataset:
         d = header.index(date_column)
         body = [r for r in rows[1:] if r[d] is not None]
         dates = tuple(_as_quarter(r[d]) for r in body)
-        series = {name: np.array([np.nan if r[i] is None else float(r[i]) for r in body]) for i, name in enumerate(header) if i != d}
+        series = {name: np.array([_number(r[i], name) for r in body]) for i, name in enumerate(header) if i != d}
         return cls(dates, series)
 
     def between(self, first: str | None = None, last: str | None = None) -> "Dataset":
@@ -81,6 +81,24 @@ def quarters(first: str, n: int) -> tuple[str, ...]:
         out.append(f"{year}Q{quarter}")
         year, quarter = (year + 1, 1) if quarter == 4 else (year, quarter + 1)
     return tuple(out)
+
+
+_MISSING = {"", "NA", "N/A", "NAN", "NULL"}
+
+
+def _number(value, column: str) -> float:
+    """A spreadsheet cell as a number; empty cells, NA, and Excel error values such as #N/A are missing."""
+    if value is None:
+        return np.nan
+    if isinstance(value, str):
+        text = value.strip()
+        if text.upper() in _MISSING or text.startswith("#"):
+            return np.nan
+        try:
+            return float(text)
+        except ValueError:
+            raise DataError(f"column {column!r} holds text that is not a number: {value!r}") from None
+    return float(value)
 
 
 def _as_quarter(value) -> str:
