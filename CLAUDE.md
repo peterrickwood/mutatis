@@ -20,6 +20,14 @@ From *mutatis mutandis*, "the necessary changes having been made": change one as
 Design stage: nothing is implemented yet. The design lives in two documents — read them before proposing or building anything:
 
 - [README.md](README.md) — what mutatis is: the concepts and the framework choices. No planning or staging goes in it.
-- [PLAN.md](PLAN.md) — the implementation plan and staging. Currently a stub.
+- [PLAN.md](PLAN.md) — the implementation plan and staging.
 
 Anything those documents mark as *proposed* or list as an open question is undecided — ask rather than assume.
+
+## How to work on this project
+
+- **The framework is the product.** The demonstrations in PLAN.md are milestones that stress-test generality. They are not deliverables to be built one by one.
+- **No bespoke code per demonstration.** A demonstration is a specification, its data, and a comparison against published results. If one seems to need its own Python, a general building block is missing: stop and discuss.
+- **Get the building blocks right.** The central design question is always which primitives exist and how they combine. Prefer small parts behind narrow contracts, so that assumptions and methods can be swapped.
+- **Prefer the general mechanism.** Do not hard-wire a specific method where a general one will do, even at some cost in speed (README, core idea 4).
+- **Test every method in isolation.** Each numerical method gets unit tests that need no whole model. Whole-model tests are few, slow, and not run by default.

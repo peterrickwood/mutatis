@@ -1,6 +1,13 @@
 # Plan
 
-> **Stub.** A proper implementation plan will replace this. What mutatis is, and why, is in [README.md](README.md); this file is for how and in what order it gets built.
+How mutatis gets built, and in what order. What mutatis is, and why, is in [README.md](README.md).
+
+**The framework is the product.** The aim is a set of small building blocks that combine to express, solve, estimate and compare many kinds of economic model. The demonstrations below are **milestones that stress-test that framework**, not things to build one at a time. If each demonstration needed its own code there would be no framework, only a collection of models, which people already have.
+
+Two things follow, and they shape every stage:
+
+- **Modularity comes first.** The question to get right is: what are the building blocks, and how do they combine? Small parts behind narrow contracts are what make an assumption or a method swappable.
+- **Every method is tested alone.** Numerical methods especially get unit tests that need no whole model. Whole-model tests are few and slow.
 
 ## What the project's success depends on
 
@@ -34,28 +41,212 @@ The order is agreed. Which papers to use is not yet confirmed. Everything is bui
 
 The RBA has published on this question, which gives a benchmark: Mulqueeney, Ballantyne & Hambur (2025), "Monetary Policy Transmission through the Lens of the RBA's Models", RBA Bulletin, April 2025. It compares MARTIN with the RBA's DSGE and notes that the two give noticeably different answers.
 
-## Draft staging
-
-From the design discussion. Not agreed.
-
-1. **Core.** The specification format. The steady-state and linear forward-looking solvers. The general estimation route and the two shortcuts. The first two demonstrations, written in the same format and estimated by the same code: the SVAR, then the textbook DSGE.
-2. **Versions.** Edit, re-estimate, compare. The built-in checks. The web app in inspect-only form.
-3. **Australia.** The third demonstration: the larger DSGE. A DSGE as a prior on a VAR. Priors on model behaviour. Switchable expectations.
-4. **Editing in the web app.** The library of ready-made blocks.
-5. **Further out.** Indexed variables for many goods and industries. Many household types. Constraints that bind only sometimes. Simulation-only models.
-
-## To test early
-
-- **What generality costs.** Time the general estimation route (sampling shocks together with parameters) against the Kalman-filter shortcut on the same linear model, at small and medium size. The design assumes the cost is tolerable; this has not been measured.
-
 ## Decided
 
 - **Our own core on JAX, not built on gEconpy.** gEconpy already parses models, derives equations from agents' optimisation problems, and solves and estimates DSGE models. It is not the base because it is licensed GPL-3.0 (mutatis is Apache-2.0), is built on PyTensor and PyMC, centres its estimation on the Kalman filter, and has no SVAR support. It is to be used as a reference to test against, alongside Dynare. "Our own core" means a thin layer over existing JAX libraries, not everything from scratch.
 
-## Implementation choices still to make
+## Rules
 
-- Whether to build estimation on an existing library (NumPyro and BlackJAX are candidates) or write it.
-- How equations are parsed.
-- Where versions and estimation results are stored.
-- How Australian data series are fetched, versioned and documented.
-- Which browser libraries draw the graph and the mathematics.
+1. **A demonstration contains no Python.** It is a folder holding a specification, a list of edits, a data manifest and stored reference results, run by one generic command.
+2. **Every capability has two consumers.** Anything added because a demonstration needs it must also be exercised, in a fast test, by a toy model from a *different* family before the demonstration is accepted. A sign restriction built for the SVAR is also tested on a forward-looking toy.
+3. **No model-family names in the core.** A check in the test suite fails if `svar`, `var`, `dsge` or `martin` appears in an identifier outside the block library, the import code and the demonstrations. Code chooses what to do by asking what a model *can do*, never what kind it is.
+4. **Lower layers do not know about higher ones.** Enforced by an automatic import check (see Layout).
+5. **Stop and discuss** whenever a demonstration seems to need a special case, or a building block's contract has to change.
+
+## The building blocks
+
+Two contracts sit in the middle. Everything else is on one side or the other.
+
+```
+ specification ─► equation system ─► SOLVED MODEL ─► POSTERIOR PROBLEM ─► draws ─► quantities ─► compare
+      ▲  (edits)     (expectation      (contract 1)     (contract 2)                  (responses,
+      │               rewrites)                                                        forecasts, ...)
+      └──────────────────────────────── versions and results ◄──────────────────────────────┘
+```
+
+| Building block | What it is |
+|---|---|
+| **Specification** | Pure data: blocks, each with ports (the variables it takes in and gives out), parameters, shocks and equations or a named JAX function; data links; restrictions; the expectations setting. The internal data structure is the real model. YAML is the first way to write one; a Python interface can follow. No JAX in this layer |
+| **Equation** | A syntax tree with time shifts and explicit "expected value of" nodes |
+| **Edit** | One of a fixed list of pure functions from specification to specification: set a prior, fix or free a parameter, set a shock's distribution, set the expectations setting, add a restriction, add a data link, add, remove or replace a block. A block may only be replaced by one with matching ports. A version is a specification; the difference between two versions is a list of edits |
+| **Expectation scheme** | A rewrite of the equation system. Rule-of-thumb replaces each "expected value" node with an expression in past values; discounted scales it; rational leaves it. What is left decides whether a solve is needed |
+| **Solver** | Turns an equation system and parameter values into a solved model. Kinds: none needed, resting point (steady state), linear forward-looking, whole path. Reports failure (no stable solution, or many) as a status, never by crashing |
+| **Solved model** (contract 1) | Can give the starting state, step the state forward given shocks and any outside variables, and say what would be observed. May also declare optional abilities: "I am linear with bell-curve shocks, here are my matrices"; "I can recover the shocks from observed values"; "I can solve a path with some variables held at given values" |
+| **Shock handling** | Joins the two contracts. Three ways, chosen from the solved model's declared abilities: *sample* the shocks as unknowns; *average them out* exactly (Kalman filter); *read them off* the data |
+| **Posterior problem** (contract 2) | The log prior and the log likelihood as two separate functions, a way to draw from the prior, and a layout. The layout names every unknown, gives its shape and allowed range, and gives its role: sampled, fixed, or restricted with no prior behind it. The two functions are kept separate because bringing the data in gradually needs them separately |
+| **Sampler** | Draws from a posterior problem. Kinds: gradual introduction of the data with gradient-based moves (sequential Monte Carlo); an exact formula for the regression case; a quick approximation around a peak |
+| **Quantity** | A named result computed from a solved model and parameter values: a response to a shock, a forecast, a structural coefficient, the response in a scenario. One definition, four users: reports, restrictions, priors on behaviour, comparison |
+| **Restriction** | An inequality or equality on a quantity |
+| **Bounds** | For unknowns with the role "restricted with no prior": the smallest and largest value of a quantity over everything the restrictions allow, for each posterior draw. Includes a check that the likelihood really does ignore that unknown, and refuses otherwise |
+| **Isolate** | Cut one block out at its ports and feed its inputs from data, giving a small model that can be estimated alone. With "post the estimates back as priors", this is equation-by-equation estimation, and also the microdata block |
+| **Scenario** | A statement of what is held at what values and which shocks adjust to make that so. Needed so that "a rise in the cash rate" means the same thing in all three model families |
+| **Check** | A function from a specification (or results) to a list of findings: counting, unique stable solution, identification, interchangeable parts |
+| **Versions and results** | A store keyed by specification, settings and random seed, plus comparison of quantities between versions |
+
+How the awkward cases fit the same blocks, with no subsystem of their own:
+
+- **A sign-restricted SVAR** is a block with three parameters: the lag coefficients, the size of the forecast errors, and the split of those errors into shocks (a rotation). Sign and zero restrictions are restrictions on quantities. Giving the rotation an even prior produces the conventional result; giving it the role "restricted with no prior" produces the range. Read's two sets of results differ by **one edit**.
+- **MARTIN** is many blocks, each estimated through *isolate* by the exact regression formula, then run together as one nonlinear step-forward model. Its scenarios use *scenario*.
+- **A DSGE** is blocks whose equations contain "expected value" nodes, the rational scheme, and the linear forward-looking solver. The housing expansion is a *replace block* edit.
+
+## Layout
+
+```
+mutatis/
+  numerics/     arrays in, arrays out: root finding, linear forward-looking solve, Kalman filter and smoother, rotations
+  dist/         distributions and their transforms
+  spec/         pure data: specification, blocks, ports, equation trees, edits, diff, YAML reader   (no JAX)
+  compile/      specification -> equation system; expectation rewrites; isolate
+  solve/        equation system -> solved model
+  measure/      data links, transforms, missing values
+  quantities/
+  infer/        shock handling, posterior problem, samplers, bounds, checks
+  versions/     results store, compare
+  library/      ready-made blocks
+  io/           Dynare import
+demos/          outside the package: specifications, edit lists, data manifests, reference results
+tests/
+```
+
+Import rules, checked automatically: `numerics` and `dist` import nothing else of ours. `spec` imports no JAX. `infer` sees a solved model only through contract 1. Nothing imports `library`, `io` or `demos`.
+
+## Testing
+
+**Three tiers.**
+
+| Tier | What | When |
+|---|---|---|
+| Fast | Unit tests of single building blocks. The great majority of tests | Every change; only the area touched |
+| Medium | Agreement between methods on small models; calibration of samplers | On request and before a milestone is accepted |
+| Slow | Replication of a demonstration against stored reference results | At milestones only |
+
+**Kinds of test, by building block.**
+
+- **Numerical methods**: cases with a known formula (one-variable Kalman filter; the forward-looking toy whose answer is 1/(1 − a·ρ)); a brute-force alternative (the likelihood computed as one large bell curve, against the Kalman filter); automatic derivatives against finite differences.
+- **Properties that must hold for any input**, tested on many random inputs: the likelihood does not change if the hidden variables are relabelled or reordered; rotating the split of shocks leaves the likelihood unchanged.
+- **Shock handling**: the three ways, and brute force, give the same likelihood at fixed parameter values on small samples.
+- **Samplers**: simulate data from known parameters many times and check the posterior covers the truth as often as it should; targets with a known answer, including two-peaked and ridge-shaped ones.
+- **Bounds**: two- and three-variable cases where the allowed set has a formula, and a dense grid of rotations as a cross-check.
+- **Specification**: read, write and read again gives the same thing; the difference between a specification and its edited version is the edit.
+- **Reference results from Dynare and MATLAB**: solution matrices, likelihood values and responses at fixed parameter values, stored with a note of where they came from. These are deterministic and must match to numerical precision.
+
+**Where exact agreement is and is not possible.** Deterministic pieces must match exactly. Results that come from random sampling cannot match number for number; they are compared within a tolerance derived from the sampling error itself, which is stated in the test. No other loosening of tolerances.
+
+**Removing special structure must not break anything.** For each shortcut there is a test that removes the structure it relies on (for example, give one shock fat tails) and checks that the general route takes over and approaches the shortcut's answer as the structure is restored.
+
+## Stages
+
+Each stage lists the *general* capabilities it adds. A demonstration is accepted when its replication test passes and every new capability has its second, different-family test.
+
+### Stage 0: foundations, before any demonstration
+
+Four toy models go through **one** code path, so that the building blocks cannot shape themselves around SVARs:
+
+- a hidden-level model (one hidden variable seen with error);
+- a two-variable VAR;
+- a one-equation forward-looking model with a known solution;
+- one backward-looking error-correction equation.
+
+Order of work:
+
+1. Project skeleton: package, test tiers, automatic checks for the import rules and the family-name rule.
+2. **A paper exercise, reviewed with you before any parser is written**: the specifications written out by hand for the four toys, a VAR with lags and a rotation, three MARTIN equations, and the housing expansion as a list of edits. This is the cheapest test of whether the specification can express what is needed.
+3. Distributions and transforms.
+4. Numerical methods, on arrays only: root finding, the linear forward-looking solve, the Kalman filter and smoother, simulation.
+5. Specification data structure, equation trees, YAML reader, edits and diff. Vector variables and matrix parameters are in from the start, because a VAR needs them.
+6. Compile and the expectation rewrites.
+7. Solvers and contract 1.
+8. Shock handling and contract 2.
+9. Samplers: gradual introduction of data with gradient moves; the exact regression formula.
+10. Quantities: responses, forecasts, estimates of hidden variables.
+11. Results store, comparison and the single generic run command, all without a web app.
+
+Accepted when: all four toys run through the same code with no branch on model family; an edit to each toy produces a comparable second version; and the two experiments under Risks have been run and reported.
+
+### Stage 1: Read's SVAR (demonstration 1)
+
+What the paper needs (from its public pages and read-me; not yet checked against the data file): four variables (cash rate, real GDP, trimmed-mean inflation, the trade-weighted exchange rate), four lags, quarterly data from 1984 to 2019, three outside variables that feed in but are not modelled (terms of trade, US GDP, the US policy rate), and six sets of restrictions. The sets restrict responses to a shock, coefficients of the interest-rate rule, and the relation of the shock to an outside measure of policy surprises. The data are public and ship with the paper. The original MATLAB code may be used with attribution; its read-me says the richest set of restrictions took about 18 hours to run.
+
+Adds: lags at realistic size; outside variables that enter a model without being modelled; parameters with special allowed ranges (a rotation); restrictions on quantities, including structural coefficients; the role "restricted with no prior" and the check that the likelihood ignores the unknown; drawing ignored unknowns from their prior; bounds and ranges; data links to public series.
+
+Second-consumer tests: a sign restriction on the forward-looking toy's response; bounds on a toy with a parameter the data cannot inform; the exact regression formula on the error-correction toy; an outside variable feeding the hidden-level toy.
+
+Accepted when: Read's results under the conventional prior and as ranges are both reproduced, and the paper's six sets of restrictions exist as six lists of edits to one base specification. Running time for the richest set is measured and reported; an 18-hour original means this may be a slow test even when correct.
+
+### Stage 2: a textbook DSGE (demonstration 2)
+
+Adds: steady state at realistic size; linearisation by automatic derivatives; the linear forward-looking solve with failure statuses, in a sampler that crosses the boundary of the stable region; priors on parameters at scale; Dynare import for a simple model; expectation schemes beyond rational.
+
+Second-consumer tests: an expectation rewrite on a backward-looking toy is a no-op; the imported Dynare model and the hand-written specification give identical results.
+
+Accepted when: solution matrices, likelihood and responses match Dynare at fixed parameter values, and switching expectations from rational to rule-of-thumb is one edit.
+
+### Stage 3: read-only web inspector
+
+Draws any specification as a graph of blocks; shows equations, priors against posteriors, data against fit; compares two versions. It reads only the specification and the results store, with no view written for a particular model family. That makes it a generality test in its own right: all four toys and both demonstrations must display.
+
+### Stage 4: the larger DSGE and its housing expansion (demonstration 3)
+
+Adds: Dynare import at full size; many blocks joined through ports; replacing and adding blocks; missing data; priors on behaviour; caching of compiled models.
+
+Run first, before building: compare the two public Dynare files and count how many equations *outside* housing changed. If many did, ports alone are not enough to describe an expansion, and the block concept needs rethinking before this stage starts.
+
+Accepted when: both published models are reproduced and the step from one to the other is a list of edits.
+
+### Stage 5: a block estimated from microdata (demonstration 4)
+
+Adds: *isolate*; data links to data on individual households or firms; posting estimates back as priors; the registry of named JAX blocks.
+
+Second-consumer test: *isolate* applied to a block of the textbook DSGE.
+
+### Stage 6: MARTIN, core equations (demonstration 5)
+
+Adds: a nonlinear step that needs a solve within each period; ordering a large set of equations; scenarios with variables held at given values; starting conditions for data that trend.
+
+Accepted when: the chosen core equations, re-estimated through *isolate*, match the published coefficients where public data allow, and the published response to a cash-rate rise is matched approximately (exactly is not possible from public sources; see PLAN.md).
+
+### Stage 7: the flagship
+
+Adds: one scenario definition that applies to all three families; shared names for the same concept across specifications; attributing a difference in results to individual edits along a path from one version to another.
+
+### Stage 8: editing in the web app
+
+The editor issues edits from the fixed list. It adds no modelling capability.
+
+## Risks, and the cheapest experiment for each
+
+| Risk | Experiment | When |
+|---|---|---|
+| Sampling the shocks as unknowns is too slow or unstable | Time it against the Kalman filter on the hidden-level toy and a three-equation model with 200 periods | Stage 0 |
+| The forward-looking solve cannot be differentiated or run on thousands of parameter values at once. JAX lacks the standard routine, so this is our own code and the largest single piece of numerical risk | On the toy with a known answer: derivatives against finite differences, agreement with SciPy's routine, and 10,000 prior draws that straddle the stable region | Stage 0 |
+| The specification cannot express what is needed | The paper exercise | Stage 0, step 2 |
+| The search for bounds stops at a local best, not the true one | Many starting points against formula cases and a grid | Stage 1 |
+| Ports are not enough to describe an expansion | Diff the two public Dynare files | Before stage 4 |
+
+## Libraries
+
+A thin core over existing permissively licensed libraries. Checked against each project's own repository on 2026-11-26; "from source" means read, not run.
+
+| Need | Choice | Why, and what was found |
+|---|---|---|
+| Sampling | **BlackJAX** (Apache-2.0, active) | Has gradual introduction of data with an automatically chosen schedule, gradient-based moves inside it, and the ordinary gradient sampler with tuning. It reports the pieces of the marginal likelihood step by step; we add them up |
+| Root finding | **Optimistix** with **Lineax** (Apache-2.0, maintained) | Root finding and least squares, with derivatives through the solution by default |
+| Linear forward-looking solve | **Our own**, in `numerics/` | JAX has no ordered matrix decomposition of the kind the standard algorithm uses, and its plain version has no derivatives. So this is written by us: solve the matrix equation by iteration, take derivatives through the equation it satisfies, and test against SciPy's standard routine as the reference |
+| Kalman filter | **Our own**, in `numerics/` | It is small and central, and must handle missing observations. dynamax (MIT) does not handle them; cuthbert (Apache-2.0) does but is at version 0.1. Both, and statsmodels, serve as references to test against |
+| Equations | **sympy** (BSD-3) for the trees, derivatives and display; conversion to JAX by sympy2jax (Apache-2.0) or sympy's own JAX output | Which conversion to use is settled in stage 0 by trying both on the toys |
+| Typed containers | **Equinox** (Apache-2.0), **jaxtyping** (MIT) | Maintained. Array shapes stated in signatures and checked in tests |
+| Dynare import | **Dynare's own preprocessor, run as a separate program** | It can write a parsed model as JSON: variables, parameters, equations as syntax trees, and the priors from the estimation section. That avoids writing a Dynare parser. It is GPL, but we run it and read its output; we do not include it. A BSD-licensed Python parser (dyno.py) exists but showed no support for priors |
+
+Not checked by running: that sympy's JAX output is in the released version and not only in development; which Dynare releases write the JSON under which file name.
+
+## Not in this plan
+
+- Time estimates. None are given; stage 0 is the largest stage by far.
+- Models with many household types, constraints that bind only sometimes, and simulation-only models. They stay in the README as future scope.
+- Who writes the block library beyond what the demonstrations need.
+
+## How we know it works
+
+- Each stage has an acceptance condition above, and a slow-tier replication test for its demonstration.
+- The automatic checks (import rules, no family names, no Python in `demos/`) run with the fast tests.
+- At the end of each stage: a short report of which capabilities were added, which toy is the second consumer of each, and anything that needed a special case.

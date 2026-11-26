@@ -260,12 +260,14 @@ flowchart TB
     v["<b>Shortcut</b><br/>read them off the data<br/>(as many shocks as series,<br/>no measurement error)"]
     p["<b>Posterior</b><br/>the same answer by every route that applies"]
     m --> j --> q
-    q -- "always available" --> g --> p
+    q -- "if data are seen with error" --> g --> p
     q -- "if the model qualifies" --> k --> p
     q -- "if the model qualifies" --> v --> p
 ```
 
-**The general route** treats the shocks as unknowns alongside the parameters and samples both together, using gradients. It works for any rule of motion and any distributions that can be evaluated and differentiated: bell-curve or fat-tailed shocks, straight-line or curved models, exact or range-only observations (Childers et al., 2022, estimate DSGE models this way). It is always available, and it defines what the right answer is.
+**The general route** treats the shocks as unknowns alongside the parameters and samples both together, using gradients. It works for any rule of motion and any distributions that can be evaluated and differentiated: bell-curve or fat-tailed shocks, straight-line or curved models, range-only observations (Childers et al., 2022, estimate DSGE models this way). It defines what the right answer is.
+
+It needs the data to be seen with some error. When a series is observed exactly, the shocks behind it are fixed by the data: there is nothing left to sample, and they have to be read off the data instead. A VAR is the standard case, where every series is observed exactly and the shocks are the model's one-step-ahead errors. A model that mixes the two cases reads off the shocks fixed by exact observations and samples the rest.
 
 **Shortcuts** give the same answer faster for models with special structure:
 
