@@ -95,26 +95,21 @@ def rts_smoother(filtered: Filtered, T: Float[Array, "n n"]) -> Smoothed:
     return Smoothed(jnp.concatenate([means, last[0][None]]), jnp.concatenate([covs, last[1][None]]))
 
 
-def stationary_covariance(T: Float[Array, "n n"], W: Float[Array, "n n"], tolerance: float = 1e-14,
-                          max_iterations: int = 64) -> tuple[Float[Array, "n n"], jax.Array]:
+def stationary_covariance(T: Float[Array, "n n"], W: Float[Array, "n n"], tolerance: float = 1e-12,
+                          doublings: int = 60) -> tuple[Float[Array, "n n"], jax.Array]:
     """The covariance X with X = T X T' + W: the long-run spread of a state that does not drift. And the outcome status.
 
-    Uses doubling: X = W + T W T' + T^2 W T^2' + ..., summed in blocks that double in length, so each iteration squares T.
-    Only meaningful when every eigenvalue of T is inside the unit circle; otherwise the sum does not settle.
+    Uses doubling: X = W + T W T' + T^2 W T^2' + ..., summed in blocks that double in length, so each step squares T. A fixed
+    number of steps (60 covers 2^60 terms) keeps it differentiable in both directions; the status says whether the sum settled.
+    Only meaningful when every eigenvalue of T is inside the unit circle.
     """
-    def step(carry):
-        X, A, iteration, _ = carry
-        X_next = X + A @ X @ A.T
-        change = jnp.max(jnp.abs(X_next - X)) / jnp.maximum(jnp.max(jnp.abs(X_next)), jnp.finfo(X.dtype).tiny)
-        return X_next, A @ A, iteration + 1, change
+    def step(carry, _):
+        X, A = carry
+        return (X + A @ X @ A.T, A @ A), None
 
-    def keep_going(carry):
-        *_, iteration, change = carry
-        return (change > tolerance) & (iteration < max_iterations) & jnp.isfinite(change)
-
-    big = jnp.array(jnp.finfo(W.dtype).max, dtype=W.dtype)
-    X, _, _, change = jax.lax.while_loop(keep_going, step, (W, T, jnp.array(0), big))
-    ok = (change <= tolerance) & jnp.all(jnp.isfinite(X))
+    (X, A), _ = jax.lax.scan(step, (W, T), None, length=doublings)
+    remainder = jnp.max(jnp.abs(A @ X @ A.T)) / jnp.maximum(jnp.max(jnp.abs(X)), jnp.finfo(X.dtype).tiny)  # what one more step would add
+    ok = jnp.all(jnp.isfinite(X)) & (remainder <= tolerance)
     return _symmetric(X), jnp.where(ok, Status.OK, Status.NOT_CONVERGED)
 
 

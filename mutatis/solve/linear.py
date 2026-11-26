@@ -20,6 +20,7 @@ import numpy as np
 from mutatis import _jax_config  # noqa: F401
 from mutatis.compile.system import System
 from mutatis.dist import MultivariateNormal
+from mutatis.numerics.factor import cholesky_with_jitter
 from mutatis.numerics.kalman import stationary_covariance
 from mutatis.numerics.linear_re import solve_backward, solve_forward_looking
 from mutatis.numerics.status import Status
@@ -77,6 +78,10 @@ class LinearSolved(SolvedModel):
             total = total + jnp.where(seen, dist.log_prob(jnp.where(seen, observed[i] - predicted[i], 0.0)), 0.0)
         return total
 
+    def sample_errors(self, key, n_periods):
+        columns = [jnp.zeros(n_periods) if dist is None else dist.sample(jax.random.fold_in(key, i), (n_periods,)) for i, dist in enumerate(self.error_dists)]
+        return jnp.stack(columns, axis=1) if columns else jnp.zeros((n_periods, 0))
+
     def initial_gaussian(self):
         return None if self.initial_mean is None else (self.initial_mean, self.initial_cov)
 
@@ -88,7 +93,7 @@ class LinearSolved(SolvedModel):
     def sample_initial(self, key):
         if self.initial_mean is None:
             raise SolveError("this model has no starting distribution: give `initial` values, or start from the data")
-        return MultivariateNormal(self.initial_mean, self.initial_cov).sample(key)
+        return self.initial_mean + cholesky_with_jitter(self.initial_cov) @ jax.random.normal(key, self.initial_mean.shape)
 
     def linear_form(self):
         return LinearForm(self.kappa, self.P, self.Q, self.R, self.d, self.Z)

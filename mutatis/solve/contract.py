@@ -61,6 +61,10 @@ class SolvedModel(eqx.Module):
         """Log probability of one period's measurement errors, over series that have them and are not missing (NaN)."""
         raise NotImplementedError
 
+    def sample_errors(self, key, n_periods: int):
+        """Measurement errors for n periods: (periods, observed series), zero for series observed exactly."""
+        raise NotImplementedError
+
     def initial_log_prob(self, state) -> jax.Array:
         raise NotImplementedError
 

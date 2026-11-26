@@ -1,0 +1,224 @@
+"""Data: dated series, and arranging them for one compiled model.
+
+A `Dataset` is a set of named series on common quarterly dates, with NaN for missing values. `arrange` lines it up with a
+compiled system: the observed series in the system's order, the outside variables (from data series or calendar definitions),
+and, when possible, the starting state read straight from the first periods of data (`DataStart`).
+
+Starting from the data works when every part of the state is either a variable observed exactly, an outside variable, or a lag
+of one of these. Then the first `presample` periods give the state, and the model explains the periods after them. This is the
+usual way VARs and equation-by-equation models are estimated ("conditional likelihood").
+"""
+
+import csv
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+
+from mutatis.compile.symbols import OUTSIDE, VARIABLE, Element, Ref
+from mutatis.compile.system import System
+from mutatis.spec.expr import Binary, Compare, Date, Expr, Index, Name, Num, Unary, parse_expression
+
+
+class DataError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class Dataset:
+    dates: tuple[str, ...]
+    series: dict[str, np.ndarray]
+
+    def __post_init__(self):
+        for name, values in self.series.items():
+            if len(values) != len(self.dates):
+                raise DataError(f"series {name!r} has {len(values)} values for {len(self.dates)} dates")
+
+    @classmethod
+    def read_csv(cls, path: str | Path) -> "Dataset":
+        with open(path, newline="") as handle:
+            rows = list(csv.reader(handle))
+        header, body = rows[0], rows[1:]
+        if header[0] != "date":
+            raise DataError("the first column of a data file must be 'date'")
+        values = np.array([[float(v) if v.strip() not in ("", "NA", "nan", "NaN") else np.nan for v in row[1:]] for row in body])
+        return cls(tuple(row[0] for row in body), {name: values[:, i] for i, name in enumerate(header[1:])})
+
+    def write_csv(self, path: str | Path) -> None:
+        with open(path, "w", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["date", *self.series])
+            for i, date in enumerate(self.dates):
+                writer.writerow([date, *(repr(float(v[i])) for v in self.series.values())])
+
+
+def quarters(first: str, n: int) -> tuple[str, ...]:
+    year, quarter = _quarter(first)
+    out = []
+    for _ in range(n):
+        out.append(f"{year}Q{quarter}")
+        year, quarter = (year + 1, 1) if quarter == 4 else (year, quarter + 1)
+    return tuple(out)
+
+
+def _quarter(text: str) -> tuple[int, int]:
+    try:
+        year, quarter = text.split("Q")
+        return int(year), int(quarter)
+    except ValueError:
+        raise DataError(f"dates must look like 1984Q1, not {text!r}") from None
+
+
+@dataclass(frozen=True)
+class DataStart:
+    state: np.ndarray       # the state in the last presample period
+    first: int              # index of the first period the model explains
+
+
+@dataclass(frozen=True)
+class Arranged:
+    dates: tuple[str, ...]
+    observed: np.ndarray    # (periods, observed series), NaN where missing
+    outside: np.ndarray     # (periods, outside variables)
+    auxiliary: dict[str, np.ndarray]
+    start: DataStart | None
+
+
+TRANSFORMS = {
+    None: lambda x: x,
+    "log": np.log,
+    "difference": lambda x: np.concatenate([[np.nan], np.diff(x)]),
+    "log_difference": lambda x: np.concatenate([[np.nan], np.diff(np.log(x))]),
+}
+
+
+def arrange(system: System, dataset: Dataset, links: dict) -> Arranged:
+    """Line the data up with the system. `links` is the specification's data links (series name -> DataLink), for transforms."""
+    def series(name):
+        if name not in dataset.series:
+            raise DataError(f"the model needs the data series {name!r}, which the data does not have")
+        transform = links[name].transform if name in links else None
+        if transform not in TRANSFORMS:
+            raise DataError(f"unknown transform {transform!r}; known: {sorted(t for t in TRANSFORMS if t)}")
+        return TRANSFORMS[transform](np.asarray(dataset.series[name], dtype=float))
+
+    periods = len(dataset.dates)
+    observed = np.stack([series(o.series) for o in system.observations], axis=1) if system.observations else np.zeros((periods, 0))
+    columns = []
+    for info in system.outside.values():
+        if info.calendar is not None:
+            columns.append(calendar_values(info.calendar, dataset.dates)[:, None])
+        else:
+            labels = _labels(system, info.key, system.layout.outside)
+            missing = [label for label in labels if label not in info.series]
+            if missing:
+                raise DataError(f"no data series feeds {missing}")
+            columns.append(np.stack([series(info.series[label]) for label in labels], axis=1))
+    outside = np.concatenate(columns, axis=1) if columns else np.zeros((periods, 0))
+    auxiliary = {name: series(name) for name in system.auxiliary_series}
+    return Arranged(dataset.dates, observed, outside, auxiliary, data_start(system, observed, outside))
+
+
+def _labels(system: System, key: str, slots) -> list[str]:
+    positions = slots[key].positions.reshape(-1)
+    labels = system.outside_labels if slots is system.layout.outside else system.variable_labels
+    return [labels[i] for i in positions]
+
+
+def state_sources(system: System) -> list[tuple[str, int, int]] | None:
+    """Where each part of the state can be read from the data: (kind, column, lag), with kind 'observed' or 'outside'.
+
+    None when some part cannot be: a variable not observed exactly, or a copy of a shock.
+    """
+    exact_identity = {}
+    for column, observation in enumerate(system.observations):
+        label = _identity_label(observation.expr, system)
+        if observation.error is None and label is not None:
+            exact_identity[label] = column
+    flat = {}
+    for key, slot in system.layout.variables.items():
+        for position, elements in zip(slot.positions.reshape(-1), _element_combinations(slot.axes, system.sets)):
+            flat[int(position)] = (key, elements)
+    sources = []
+    for position in range(system.n_variables):
+        source = _source(*flat[position], system, exact_identity, lag=0)
+        if source is None:
+            return None
+        sources.append(source)
+    return sources
+
+
+def _source(key, elements, system, exact_identity, lag):
+    if key in system.auxiliary:
+        aux = system.auxiliary[key]
+        if "@lag" in key:
+            depth = int(key.rsplit("@lag", 1)[1])
+            return _source(aux.base, elements, system, exact_identity, lag + depth)
+        if aux.base_kind == OUTSIDE:
+            outside_positions = system.layout.outside[aux.base].positions
+            index = outside_positions[tuple(_position(system, a, e) for a, e in zip(system.layout.outside[aux.base].axes, elements))]
+            return ("outside", int(index), lag)
+        return None  # a copy of a shock cannot be read from data
+    label = f"{key}[{', '.join(map(str, elements))}]" if elements else key
+    return ("observed", exact_identity[label], lag) if label in exact_identity else None
+
+
+def _position(system, axis, element):
+    return system.layout.element_position(axis, element)
+
+
+def _element_combinations(axes, sets):
+    combos = [()]
+    for axis in axes:
+        combos = [c + (e,) for c in combos for e in sets[axis]]
+    return combos
+
+
+def _identity_label(expr: Expr, system: System) -> str | None:
+    """If an observation is just one element of one variable, that element's label."""
+    if isinstance(expr, Ref) and expr.kind == VARIABLE and not system.layout.variables[expr.key].axes:
+        return expr.key
+    if isinstance(expr, Index) and isinstance(expr.base, Ref) and expr.base.kind == VARIABLE and all(isinstance(i, Element) for i in expr.items):
+        axes = system.layout.variables[expr.base.key].axes
+        if len(axes) == len(expr.items):
+            return f"{expr.base.key}[{', '.join(str(i.value) for i in expr.items)}]"
+    return None
+
+
+def data_start(system: System, observed: np.ndarray, outside: np.ndarray) -> DataStart | None:
+    sources = state_sources(system)
+    if sources is None:
+        return None
+    p = system.presample
+    if observed.shape[0] <= p:
+        raise DataError(f"the data has {observed.shape[0]} periods; at least {p + 1} are needed")
+    state = np.array([(observed if kind == "observed" else outside)[p - 1 - lag, column] for kind, column, lag in sources])
+    if np.any(np.isnan(state)):
+        return None
+    return DataStart(state, p)
+
+
+def calendar_values(text: str, dates: tuple[str, ...]) -> np.ndarray:
+    """Evaluate a calendar definition such as 'date < 2008Q2' on each date: 1 where a comparison holds, 0 where it does not."""
+    expr = parse_expression(text)
+    positions = np.array([year + (quarter - 1) / 4 for year, quarter in map(_quarter, dates)])
+    return np.asarray(_calendar(expr, positions), dtype=float) * np.ones(len(dates))
+
+
+def _calendar(expr: Expr, positions):
+    match expr:
+        case Name(id="date"):
+            return positions
+        case Date(year=year, quarter=quarter):
+            return year + (quarter - 1) / 4
+        case Num(value=value):
+            return float(value)
+        case Unary(op=op, operand=operand):
+            return -_calendar(operand, positions) if op == "-" else _calendar(operand, positions)
+        case Compare(op=op, left=left, right=right):
+            a, b = _calendar(left, positions), _calendar(right, positions)
+            return {"<": a < b, "<=": a <= b, ">": a > b, ">=": a >= b, "==": a == b, "!=": a != b}[op].astype(float)
+        case Binary(op=op, left=left, right=right) if op in "+-*":
+            a, b = _calendar(left, positions), _calendar(right, positions)
+            return a + b if op == "+" else a - b if op == "-" else a * b
+    raise DataError(f"a calendar definition may use only 'date', dates such as 2008Q2, numbers, comparisons and + - *")

@@ -62,3 +62,25 @@ be zero. The choice of method must not depend on a parameter value, or it could 
 **14. Starting distribution, for now:** the `initial` priors if every variable has one (they must be normal for now); otherwise
 the long-run distribution, when every shock is normal and the model has no outside variables; otherwise none, and estimation
 must start from the data. Giving `initial` for some variables but not others is an error.
+
+**15. The posterior problem gets its solver as an argument (a function from parameter values to a solved model).** This keeps
+the estimation layer independent of how models are solved, as the import rules require. The wiring lives in
+`mutatis/versions/pipeline.py`, the one module that knows every layer.
+
+**16. The method for handling shocks is chosen automatically from the specification and the data alone:** read the shocks off
+the data if every series is observed exactly, there are as many shocks as series, the starting state can be read from the data,
+and nothing is missing; otherwise the Kalman filter if the model is linear with normal noise; otherwise sample the shocks if
+every series has measurement error. A method can also be forced, which is how the methods are tested against each other.
+
+**17. The starting state is read from the data whenever it can be** (every part of it is a variable observed exactly, an
+outside variable, or a lag of one), and the model explains the periods after it. Otherwise it comes from the model's starting
+distribution. This matches standard practice for VARs and equation-by-equation models, and lets read_off and Kalman be
+compared on exactly the same periods.
+
+**18. When the shocks are sampled and the starting state is not read from the data, the sampler moves a standard normal vector
+u, and the state is mean + L u.** The starting covariance is often singular (the price in the forward-looking toy is an exact
+multiple of demand), so a density for the state itself need not exist. L is a Cholesky factor with a jitter of 1e-12 relative
+to the largest variance.
+
+**19. The stationary covariance uses a fixed 60 doubling steps instead of a loop that stops when settled.** JAX cannot
+differentiate backwards through a loop whose length depends on the data, and gradient samplers need these derivatives.
