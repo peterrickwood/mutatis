@@ -99,3 +99,95 @@ def test_stationary_covariance():
     np.testing.assert_allclose(X, scipy.linalg.solve_discrete_lyapunov(T, R @ R.T), rtol=1e-9)
     _, status = stationary_covariance(jnp.eye(2), jnp.eye(2))  # a random walk has no long-run spread
     assert int(status) == Status.NOT_CONVERGED
+
+
+@pytest.mark.parametrize("radius", [0.99, 0.9999, 0.99999])
+def test_stationary_covariance_near_the_unit_circle(radius):
+    rng = np.random.default_rng(30)
+    T = rng.normal(size=(30, 30))
+    T *= radius / np.max(np.abs(np.linalg.eigvals(T)))
+    R = rng.normal(size=(30, 30))
+    X, status = stationary_covariance(jnp.asarray(T), jnp.asarray(R @ R.T))
+    assert int(status) == Status.OK
+    X, expected = np.asarray(X), scipy.linalg.solve_discrete_lyapunov(T, R @ R.T)
+    scale = np.max(np.abs(expected))
+    assert np.max(np.abs(X - T @ X @ T.T - R @ R.T)) < 1e-13 * scale  # the residual (a backward error) is at rounding level
+    # The answer's sensitivity grows like 1 / (1 - radius^2), so two correct methods may differ by rounding times that.
+    assert np.max(np.abs(X - expected)) < 1e3 * np.finfo(float).eps / (1 - radius**2) * scale
+
+
+# At moderate sizes, against statsmodels (medium tier) -------------------------------------------------------------------------
+
+def simulated_model(rng, n, k, t, missing, exact, noise_rank):
+    """A stable model with `exact` series observed without error and state noise of rank `noise_rank`, and data simulated from it.
+    Also returns R, with W = R R'."""
+    T = rng.normal(size=(n, n))
+    T *= 0.95 / np.max(np.abs(np.linalg.eigvals(T)))
+    R, Z = rng.normal(size=(n, noise_rank)), rng.normal(size=(k, n))
+    h = rng.uniform(0.1, 0.5, k)
+    h[:exact] = 0.0
+    c, d, m0 = 0.1 * rng.normal(size=(t, n)), rng.normal(size=(t, k)), rng.normal(size=n)
+    state, y = m0 + rng.normal(size=n), np.zeros((t, k))
+    for s in range(t):
+        state = c[s] + T @ state + R @ rng.normal(size=noise_rank)
+        y[s] = d[s] + Z @ state + np.sqrt(h) * rng.normal(size=k)
+    y[rng.uniform(size=(t, k)) < missing] = np.nan
+    return dict(y=y, m0=m0, P0=np.eye(n), T=T, W=R @ R.T, Z=Z, H=np.diag(h), c=c, d=d), R
+
+
+def statsmodels_filter_and_smoother(model):
+    from statsmodels.tsa.statespace.kalman_smoother import KalmanSmoother
+
+    t, k = model["y"].shape
+    n = model["T"].shape[0]
+    smoother = KalmanSmoother(k_endog=k, k_states=n, k_posdef=n)
+    smoother.bind(model["y"])
+    smoother["design"], smoother["obs_cov"], smoother["transition"] = model["Z"], model["H"], model["T"]
+    smoother["selection"], smoother["state_cov"], smoother["obs_intercept"] = np.eye(n), model["W"], model["d"].T
+    smoother["state_intercept"] = np.column_stack([model["c"][1:].T, np.zeros(n)])  # in statsmodels c(t + 1) moves the state from t to t + 1
+    smoother.initialize_known(model["c"][0] + model["T"] @ model["m0"], model["T"] @ model["P0"] @ model["T"].T + model["W"])
+    out = smoother.smooth()
+    return out.llf_obs.sum(), out.filtered_state.T, out.smoothed_state.T
+
+
+@pytest.mark.medium
+@pytest.mark.parametrize("n, k, missing, exact, noise_rank", [(20, 5, 0.0, 0, 20), (20, 5, 0.2, 2, 8), (50, 10, 0.2, 3, 50), (50, 10, 0.2, 3, 15)])
+def test_matches_statsmodels_at_moderate_size(n, k, missing, exact, noise_rank):
+    model, _ = simulated_model(np.random.default_rng(n + noise_rank), n, k, 200, missing, exact, noise_rank)
+    filtered = kalman_filter(**as_jax(model))
+    smoothed = rts_smoother(filtered, jnp.asarray(model["T"]))
+    log_likelihood, filtered_means, smoothed_means = statsmodels_filter_and_smoother(model)
+    np.testing.assert_allclose(filtered.log_likelihood, log_likelihood, rtol=1e-12)
+    np.testing.assert_allclose(filtered.filtered_mean, filtered_means, rtol=0, atol=1e-12 * np.max(np.abs(filtered_means)))
+    # The smoother inverts predicted covariances, which are singular when the state noise is: a pseudo-inverse here, another
+    # route in statsmodels. They agreed to 7e-13 (relative) in the audit.
+    np.testing.assert_allclose(smoothed.mean, smoothed_means, rtol=0, atol=1e-10 * np.max(np.abs(smoothed_means)))
+
+
+@pytest.mark.medium
+def test_log_likelihood_gradient_at_moderate_size():
+    rng = np.random.default_rng(3)
+    model, R = simulated_model(rng, 20, 5, 200, 0.2, 2, 8)
+    base = as_jax(model)
+
+    def log_lik(T, R, h):  # W = R R' stays positive semi-definite, and exact series stay exact, along every direction used
+        return kalman_filter(**{**base, "T": T, "W": R @ R.T, "H": jnp.diag(h)}).log_likelihood
+
+    args = [base["T"], jnp.asarray(R), jnp.diagonal(base["H"])]
+    gradients = jax.grad(log_lik, argnums=(0, 1, 2))(*args)
+    value = jax.jit(log_lik)
+    for which, gradient in enumerate(gradients):
+        direction = jnp.asarray(rng.normal(size=args[which].shape))
+        if which == 2:
+            direction = jnp.where(args[2] > 0, direction, 0.0)
+        direction = direction / jnp.linalg.norm(direction) * jnp.linalg.norm(args[which])
+
+        def central(step):
+            plus, minus = list(args), list(args)
+            plus[which], minus[which] = args[which] + step * direction, args[which] - step * direction
+            return float(value(*plus) - value(*minus)) / (2 * step)
+
+        fine, coarse = central(5e-6), central(1e-5)
+        numeric = (4 * fine - coarse) / 3  # Richardson extrapolation removes the step^2 term
+        # Uncertain by about the change between the two steps, plus rounding in the likelihood divided by the step.
+        assert abs(float(jnp.sum(gradient * direction)) - numeric) < 10 * abs(fine - coarse) + 1e-7 * abs(numeric)
