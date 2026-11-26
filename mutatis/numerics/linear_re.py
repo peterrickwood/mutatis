@@ -174,17 +174,28 @@ def solve_sylvester(M: Float[Array, "n n"], A: Float[Array, "n n"], P: Float[Arr
     return _sylvester_by_doubling(jax.scipy.linalg.lu_factor(M), A, P, R, transposed=False)
 
 
-def _sylvester_by_doubling(lu, A, P, R, transposed: bool, max_doublings: int = 64):
+def _sylvester_by_doubling(lu, A, P, R, transposed: bool):
     # transposed: solve M' X + A' X P' = R, the transposed equation that reverse-mode derivatives need.
     trans = 1 if transposed else 0
     F = -jax.scipy.linalg.lu_solve(lu, A.T if transposed else A, trans=trans)
-    X = jax.scipy.linalg.lu_solve(lu, R, trans=trans)
-    P = P.T if transposed else P
-    eps = jnp.finfo(X.dtype).eps
+    X, _ = sum_by_doubling(F, jax.scipy.linalg.lu_solve(lu, R, trans=trans), P.T if transposed else P)
+    return X
+
+
+def sum_by_doubling(F: Float[Array, "n n"], G: Float[Array, "n m"], P: Float[Array, "m m"],
+                    max_doublings: int = 64) -> tuple[Float[Array, "n m"], Float[Array, ""]]:
+    """The sum of F^j G P^j over j = 0, 1, 2, ..., which solves X = G + F X P, and the relative size of the last block added.
+
+    Step k adds the block of terms from 2^k to 2^(k+1) - 1 as F_k X P_k, then squares F_k and P_k, so k steps cover 2^k terms
+    with products of whole matrices only. Stops when a block changes the sum by less than rounding (relative, in the 1-norm),
+    when it is not finite, or after `max_doublings`. The sum converges when every eigenvalue of F times every eigenvalue of P
+    is less than one in size; a last block that is still large, or not finite, says it did not.
+    """
+    eps = jnp.finfo(G.dtype).eps
 
     def step(carry):
         X, F, P, _, k = carry
-        increment = F @ X @ P  # the next block of terms: sum over j from 2^k to 2^(k+1) - 1 of F^j G P^j
+        increment = F @ X @ P
         X = X + increment
         change = _norm(increment) / jnp.maximum(_norm(X), jnp.finfo(X.dtype).tiny)
         return X, F @ F, P @ P, change, k + 1
@@ -193,5 +204,5 @@ def _sylvester_by_doubling(lu, A, P, R, transposed: bool, max_doublings: int = 6
         *_, change, k = carry
         return (change > eps) & (k < max_doublings)
 
-    X, *_ = jax.lax.while_loop(keep_going, step, (X, F, P, jnp.array(jnp.inf, X.dtype), jnp.array(0)))
-    return X
+    X, _, _, change, _ = jax.lax.while_loop(keep_going, step, (G, F, P, jnp.array(jnp.inf, G.dtype), jnp.array(0)))
+    return X, change

@@ -13,6 +13,7 @@ update. It gives the log likelihood of the data, with the hidden states and shoc
 state estimates. The smoother then runs backwards to give estimates of the state at every date using all the data.
 """
 
+import functools
 from typing import NamedTuple
 
 import jax
@@ -20,6 +21,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float
 
 from mutatis import _jax_config  # noqa: F401
+from mutatis.numerics.linear_re import sum_by_doubling
 from mutatis.numerics.status import Status
 
 LOG_2PI = jnp.log(2.0 * jnp.pi)
@@ -99,21 +101,38 @@ def rts_smoother(filtered: Filtered, T: Float[Array, "n n"]) -> Smoothed:
 
 
 def stationary_covariance(T: Float[Array, "n n"], W: Float[Array, "n n"], tolerance: float = 1e-12,
-                          doublings: int = 60) -> tuple[Float[Array, "n n"], jax.Array]:
+                          max_doublings: int = 64) -> tuple[Float[Array, "n n"], jax.Array]:
     """The covariance X with X = T X T' + W: the long-run spread of a state that does not drift. And the outcome status.
 
-    Uses doubling: X = W + T W T' + T^2 W T^2' + ..., summed in blocks that double in length, so each step squares T. A fixed
-    number of steps (60 covers 2^60 terms) keeps it differentiable in both directions; the status says whether the sum settled.
-    Only meaningful when every eigenvalue of T is inside the unit circle.
+    X is the sum of T^j W T'^j, summed by doubling (`linear_re.sum_by_doubling`): blocks that double in length, so each step
+    squares T, stopping once a block no longer changes the sum. The status says whether it settled, which needs every eigenvalue
+    of T inside the unit circle. Derivatives come from the equation X satisfies, dX = T dX T' + dT X T' + T X dT' + dW, solved
+    the same way, not from the steps, so the steps need not be stored.
     """
-    def step(carry, _):
-        X, A = carry
-        return (X + A @ X @ A.T, A @ A), None
+    X, status = _stationary(T, W, tolerance, max_doublings)
+    return X, status.astype(int)
 
-    (X, A), _ = jax.lax.scan(step, (W, T), None, length=doublings)
-    remainder = jnp.max(jnp.abs(A @ X @ A.T)) / jnp.maximum(jnp.max(jnp.abs(X)), jnp.finfo(X.dtype).tiny)  # what one more step would add
-    ok = jnp.all(jnp.isfinite(X)) & (remainder <= tolerance)
-    return _symmetric(X), jnp.where(ok, Status.OK, Status.NOT_CONVERGED)
+
+@functools.partial(jax.custom_jvp, nondiff_argnums=(2, 3))
+def _stationary(T, W, tolerance, max_doublings):
+    X, change = sum_by_doubling(T, W, T.T, max_doublings)
+    ok = jnp.all(jnp.isfinite(X)) & (change <= tolerance)
+    return _symmetric(X), jnp.where(ok, Status.OK, Status.NOT_CONVERGED).astype(X.dtype)
+
+
+@_stationary.defjvp
+def _stationary_jvp(tolerance, max_doublings, primals, tangents):
+    T, W = primals
+    dT, dW = tangents
+    X, status = _stationary(T, W, tolerance, max_doublings)
+    ok = status == Status.OK
+    # Where it did not settle the tangent is zero, never NaN: X may be infinite there, so it is replaced before any use.
+    X_safe, T = jnp.where(ok, X, 0.0), jnp.where(ok, T, 0.0)
+    right = jnp.where(ok, dT @ X_safe @ T.T + T @ X_safe @ dT.T + dW, 0.0)
+    dX = jax.lax.custom_linear_solve(lambda Y: Y - T @ Y @ T.T, right,
+                                     lambda _, R: sum_by_doubling(T, R, T.T, max_doublings)[0],
+                                     lambda _, R: sum_by_doubling(T.T, R, T, max_doublings)[0])
+    return (X, status), (_symmetric(dX), jnp.zeros_like(status))
 
 
 def _symmetric(X):

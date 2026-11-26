@@ -116,6 +116,36 @@ def test_stationary_covariance_near_the_unit_circle(radius):
     assert np.max(np.abs(X - expected)) < 1e3 * np.finfo(float).eps / (1 - radius**2) * scale
 
 
+@pytest.mark.parametrize("radius", [0.5, 0.99])
+def test_stationary_covariance_derivatives(radius):
+    rng = np.random.default_rng(32)
+    T = rng.normal(size=(6, 6))
+    T = jnp.asarray(T * radius / np.max(np.abs(np.linalg.eigvals(T))))
+    R = jnp.asarray(rng.normal(size=(6, 6)))
+    weights = jnp.asarray(rng.normal(size=(6, 6)))
+    summary = lambda T, R: jnp.sum(weights * stationary_covariance(T, R @ R.T)[0])
+    reverse = jax.grad(summary, argnums=(0, 1))(T, R)
+    forward = jax.jacfwd(summary, argnums=(0, 1))(T, R)
+    for which, (g_reverse, g_forward) in enumerate(zip(reverse, forward)):
+        args = [T, R]
+        direction = jnp.asarray(rng.normal(size=args[which].shape))
+
+        def central(step):
+            plus, minus = list(args), list(args)
+            plus[which], minus[which] = args[which] + step * direction, args[which] - step * direction
+            return float(summary(*plus) - summary(*minus)) / (2 * step)
+
+        fine, coarse = central(5e-7), central(1e-6)
+        numeric = (4 * fine - coarse) / 3  # Richardson extrapolation
+        np.testing.assert_allclose(float(jnp.sum(g_reverse * direction)), numeric, rtol=10 * abs(fine - coarse) / abs(numeric) + 1e-7)
+        np.testing.assert_allclose(g_forward, g_reverse, rtol=1e-9, atol=1e-12 * float(jnp.max(jnp.abs(g_reverse))))
+
+
+def test_stationary_covariance_derivatives_where_it_does_not_exist_are_zero():
+    gradient = jax.grad(lambda T: jnp.sum(stationary_covariance(T, jnp.eye(2))[0]))(jnp.array([[1.2, 0.0], [0.3, 0.5]]))
+    assert bool(jnp.all(gradient == 0.0))
+
+
 def test_gradient_memory_stays_near_one_covariance_per_period():
     # Reverse mode keeps what the backward pass needs from every period. Kept naively that was about 7 matrices of n x n per
     # period per particle (43 GB for 50 states, 150 periods and 2,000 particles); recomputing each period's step in the backward

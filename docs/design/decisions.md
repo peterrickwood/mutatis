@@ -200,3 +200,13 @@ states (4.66 s against 4.68 s, 4.31 s against 4.28 s for a batch of gradients) a
 agreed to 1e-13 relative. A fast test checks the compiled program's memory so this cannot silently return. The alternative,
 evaluating particles in smaller batches, would bound memory too, but it lives in the sampler and leaves each gradient's
 memory as large.
+
+**37. The stationary covariance stops when settled and takes its derivatives from the equation it solves; this replaces
+decision 19.** Decision 19 fixed 60 doubling steps so that reverse-mode derivatives could pass through the loop, which meant
+storing every step: for 50 states and 2,000 particles the gradient needed 9.9 GB and 7.4 s. Now the sum stops once a block no
+longer changes it (`linear_re.sum_by_doubling`, the same routine the forward-looking solve's derivative uses), and the
+derivative solves dX = T dX T' + dT X T' + T X dT' + dW by the same doubling (a custom derivative rule, as for the
+forward-looking solve). Evidence: 0.36 GB and 0.93 s for that gradient; the value took 0.48 s instead of 1.38 s. Accuracy
+against SciPy's solve_discrete_lyapunov is unchanged (residuals at rounding level up to a largest root of 0.99999).
+Derivatives match finite differences and agree between forward and reverse mode (fast tests), and are zero, not NaN, where
+the covariance does not exist.
