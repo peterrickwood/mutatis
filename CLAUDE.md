@@ -17,10 +17,11 @@ From *mutatis mutandis*, "the necessary changes having been made": change one as
 
 ## Status
 
-Design stage: nothing is implemented yet. The design lives in two documents — read them before proposing or building anything:
+Under construction: stage 0 (foundations) is built and stage 1 (Read's SVAR) is in progress. The design lives in these documents — read them before proposing or building anything:
 
 - [README.md](README.md) — what mutatis is: the concepts and the framework choices. No planning or staging goes in it.
-- [PLAN.md](PLAN.md) — the implementation plan and staging.
+- [PLAN.md](PLAN.md) — the implementation plan and staging, with the status of each stage.
+- [docs/design/decisions.md](docs/design/decisions.md) — decisions taken during implementation, each with its reason and alternative.
 
 Anything those documents mark as *proposed* or list as an open question is undecided — ask rather than assume.
 

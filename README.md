@@ -2,7 +2,7 @@
 
 A laboratory for economic models. Write a model down, estimate it on data, then change one assumption and see what difference the change made.
 
-> **Status: design stage.** Nothing is implemented yet. This document describes what mutatis is intended to be: the concepts and the framework choices. Parts marked *proposed*, and everything under [Open questions](#open-questions), are not settled. The implementation plan and staging live in [PLAN.md](PLAN.md).
+> **Status: under construction.** The foundations are built and the first demonstration is in progress; see [PLAN.md](PLAN.md) for what is done and what is next. This document describes what mutatis is: the concepts and the framework choices. Parts marked *proposed*, and everything under [Open questions](#open-questions), are not settled.
 
 ## What it is for
 
@@ -286,7 +286,7 @@ In principle the general route still applies: treat every internal draw as an un
 
 The true cases need the internal randomness averaged out by running many simulated copies side by side (a particle filter), or estimation by matching summary statistics. See [Which models fit](#which-models-fit).
 
-**The contract between a model and its estimation** is deliberately narrow: a function that takes values for the parameters and shocks and returns the logarithm of the joint probability, with exact derivatives. Anything that can estimate from such a function can be plugged in.
+**The contract between a model and its estimation** is deliberately narrow: the logarithm of the prior and the logarithm of the likelihood, as two separate functions of the unknowns with exact derivatives, a way to draw the unknowns from the prior, and a description of which unknown is which. The two densities are kept apart because bringing the data in gradually needs them separately. When shocks are sampled they are among the unknowns. Anything that can estimate from such a description can be plugged in.
 
 ### What the sampler has to do
 

@@ -146,3 +146,8 @@ Tolerances for comparing with a reference come from sampling error on both sides
 error of the 16th and 84th percentiles of a normal (1.51 sd / sqrt(N)). Observed on Restriction (1): posterior means agree with
 standardised differences of sd 0.82; interval ends with sd 1.7, which suggests this standard error understates the noise of
 shortest-interval ends.
+
+**31. README's paragraph on the contract between a model and its estimation now describes what was built:** separate log prior
+and log likelihood functions, prior draws, and a layout of the unknowns, instead of one joint-probability function. This was
+flagged on 2026-11-25 as out of date after the plan changed the contract, and had no answer; it was updated under the instruction
+to decide, document and move on.
