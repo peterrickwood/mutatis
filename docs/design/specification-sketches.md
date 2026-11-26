@@ -71,6 +71,7 @@ An **edit** is one entry from a fixed list. Each takes a specification and retur
 | `replace_equation` | one equation inside a block, keeping the block's inputs and outputs **(Added: MARTIN; agreed)** |
 | `extend_set`, `shrink_set` | the elements of a set **(Added: housing)** |
 | `bind`, `untie` | whether several block instances share one parameter **(Added: housing)** |
+| `name_number` | turns a number written in equations into a named parameter **(Added: question 2)** |
 
 ## 1. Hidden level (toy)
 
@@ -375,7 +376,7 @@ blocks:
 In this excerpt, the inputs that other parts of MARTIN would supply are outside variables fed from data. Estimating one equation alone is *isolate*: cut the block out and feed its inputs from data. Running the excerpt is the four blocks together, stepping forward one quarter at a time, with the identities solved within each quarter.
 
 - **Added: `calendar`.** Equation (8) has a dummy for dates before 2008Q2.
-- **Added: name every number that is a modelling choice.** The paper prints 0.5, 0.15, 0.7 and so on as numbers. As bare numbers they could not be relaxed by an edit. Named as fixed parameters, they can. Pure constants such as 100 stay as numbers.
+- **Found: numbers written directly in equations.** The paper prints 0.5, 0.15, 0.7 and so on as numbers. The excerpt names them as fixed parameters, which is allowed but not required (see question 2).
 - **Found: tied coefficients.** `(1 - wage_income_share - alpha1 - alpha2)` ties one coefficient to three others. Untying it is a `replace_equation` edit: the same equation with that coefficient given its own parameter.
 - **Found: `0.3` equals `1 - 0.7`** but is printed separately. Whether to tie the two is a modelling decision the person transcribing has to make, and it changes what a later edit to `smoothing` does.
 - **Found: the exact regression formula does not apply to (8)** for the same reason as toy 4 (`gamma * beta1`). The published coefficients are least-squares estimates, which equal the posterior peak under flat priors. So reproducing them means comparing a peak, not a formula.
@@ -445,7 +446,7 @@ One format covers all seven cases, with the additions below. Nothing needed a mo
 2. `initial`: priors on starting values of variables that never settle.
 3. Data links in three roles: `observes` (with or without error), `feeds` an outside variable, or used only by restrictions; with their own parameters.
 4. `calendar` variables.
-5. Every number that is a modelling choice is a named parameter, fixed or not.
+5. Numbers written directly in equations are allowed; mutatis finds and lists them (see question 2).
 6. `definitions`: named expressions of parameters, as Dynare's model-local variables. Reno uses them; none of the sketches above needed one.
 7. A small expression language for quantities, used by restrictions and priors on behaviour.
 8. Block templates over sets; `extend_set`; `bind` and `untie`.
@@ -459,10 +460,10 @@ One format covers all seven cases, with the additions below. Nothing needed a mo
 ## Questions for you
 
 1. **One equation per output, per block.** *Decided: yes.* Each block names the variables its equations determine, and must have exactly that many equations. That makes counting checkable block by block, gives `replace_block` and *isolate* a precise meaning, and costs some bookkeeping: a market-clearing condition goes in a small block that "determines" the price or quantity it pins down. The assignment never changes the solution, because all equations are solved together. An importer can make the assignment automatically by matching equations to variables. The alternatives considered were counting only for the whole model, as Dynare does, and model-level market-clearing conditions, as the sequence-space Jacobian toolkit does.
-2. **Naming every number.** Should the convention be that every number that is a modelling choice is a named parameter, as in the MARTIN excerpt, while pure constants such as 100 stay as numbers? The alternative is to leave published numbers bare and accept that they cannot be relaxed by an edit.
+2. **Numbers in equations.** *Decided: bare numbers are allowed, found automatically, and named when useful.* mutatis finds every number written directly in an equation, lists it in the inspector as an unnamed fixed value, and includes it in automatic sensitivity checks. One edit (`name_number`) makes a number into a named parameter, replacing it in the equations chosen. A number should be named when it appears in more than one place (MARTIN's 0.3 is 1 − 0.7, and changing one without the other silently changes the model) or when it is to be relaxed. Numbers that are units, such as 100 for percent, can be marked so the inspector hides them.
 3. **Small changes inside an equation.** *Decided: yes.* There is a `replace_equation` edit, so untying MARTIN's `(1 - 0.15 - α1 - α2)` does not mean replacing the whole block.
-4. **Templates, `extend_set`, `bind` and `untie`.** *Decided: they are part of the design now.* Both RBA multi-sector models are written as equations repeated over lists of sectors (the 2015 base model "for j ∈ {n, m, z}", the 2018 housing model with h added), so templates match the source material. When they are built is still to be confirmed.
-5. **The base 2015 model.** Its code does not appear to be public from the RBA. PLAN.md says demonstration 3 has "a published answer on both sides". That may not hold. This does not block stage 0, but before stage 4 we need either the base code from elsewhere, or a different second side.
+4. **Templates, `extend_set`, `bind` and `untie`.** *Decided: they are part of the design, and built in stage 0.* Both RBA multi-sector models are written as equations repeated over lists of sectors (the 2015 base model "for j ∈ {n, m, z}", the 2018 housing model with h added), so templates match the source material.
+5. **The base 2015 model.** *Resolved.* Its code is not public anywhere found, but the paper prints the whole model, calibration and estimation results, so it is rebuilt from the paper and matched approximately. The equation-by-equation comparison with the housing model is done at the start of stage 4 (PLAN.md).
 
 ## Sources
 
