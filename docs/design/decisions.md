@@ -102,3 +102,12 @@ cached result must not be reused after a default changes, which happened once du
 the three-parameter forward-looking toy (150 periods, 1,000 particles); now 1.5 minutes, with the same posterior and the sampler
 tests on known answers still passing. Most of the remaining time is the Kalman filter's gradient (0.35 s per gradient over 1,000
 particles), so speed is a known issue for later stages.
+
+**24. Data transforms are expressions in the raw series `x`,** such as `"100 * log(x)"` or `"d(log(x))"`, instead of a fixed list
+of named transforms. Read (2022) needs 100 × log, and a fixed list would keep growing.
+
+**25. Data are not stored in the repository; a demonstration's manifest says where to download them.** The manifest gives a URL,
+a checksum, the file inside a zip, the sheet, and the sample. Files are cached outside the repository (~/.cache/mutatis). The
+first case is Read's VARData.xlsx: the RBA licenses its papers under CC BY 4.0 but excludes third-party material, and the file
+compiles ABS, US and academic series. Checksums must be quoted in the YAML, because a checksum made only of digits would
+otherwise be read as a number.

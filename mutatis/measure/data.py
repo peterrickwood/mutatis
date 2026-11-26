@@ -10,6 +10,7 @@ usual way VARs and equation-by-equation models are estimated ("conditional likel
 """
 
 import csv
+import io
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,7 +18,7 @@ import numpy as np
 
 from mutatis.compile.symbols import OUTSIDE, VARIABLE, Element, Ref
 from mutatis.compile.system import System
-from mutatis.spec.expr import Binary, Compare, Date, Expr, Index, Name, Num, Unary, parse_expression
+from mutatis.spec.expr import Binary, Call, Compare, Date, Expr, Index, Name, Num, Shift, Unary, parse_expression
 
 
 class DataError(ValueError):
@@ -44,6 +45,27 @@ class Dataset:
         values = np.array([[float(v) if v.strip() not in ("", "NA", "nan", "NaN") else np.nan for v in row[1:]] for row in body])
         return cls(tuple(row[0] for row in body), {name: values[:, i] for i, name in enumerate(header[1:])})
 
+    @classmethod
+    def read_excel(cls, path: "str | Path | io.BytesIO", sheet: str, date_column: str) -> "Dataset":
+        """A sheet with one row per quarter: a date column (dates or text such as 1984Q1), then one column per series."""
+        import openpyxl
+
+        rows = list(openpyxl.load_workbook(path, read_only=True, data_only=True)[sheet].iter_rows(values_only=True))
+        header = [str(h) for h in rows[0]]
+        if date_column not in header:
+            raise DataError(f"no column {date_column!r} in sheet {sheet!r}; columns: {header}")
+        d = header.index(date_column)
+        body = [r for r in rows[1:] if r[d] is not None]
+        dates = tuple(_as_quarter(r[d]) for r in body)
+        series = {name: np.array([np.nan if r[i] is None else float(r[i]) for r in body]) for i, name in enumerate(header) if i != d}
+        return cls(dates, series)
+
+    def between(self, first: str | None = None, last: str | None = None) -> "Dataset":
+        """The periods from `first` to `last`, inclusive."""
+        start = self.dates.index(first) if first else 0
+        stop = self.dates.index(last) + 1 if last else len(self.dates)
+        return Dataset(self.dates[start:stop], {k: v[start:stop] for k, v in self.series.items()})
+
     def write_csv(self, path: str | Path) -> None:
         with open(path, "w", newline="") as handle:
             writer = csv.writer(handle)
@@ -59,6 +81,14 @@ def quarters(first: str, n: int) -> tuple[str, ...]:
         out.append(f"{year}Q{quarter}")
         year, quarter = (year + 1, 1) if quarter == 4 else (year, quarter + 1)
     return tuple(out)
+
+
+def _as_quarter(value) -> str:
+    """A spreadsheet date (a date, or text such as 1984Q1) as the quarter it falls in."""
+    if hasattr(value, "month"):
+        return f"{value.year}Q{(value.month - 1) // 3 + 1}"
+    _quarter(str(value))
+    return str(value)
 
 
 def _quarter(text: str) -> tuple[int, int]:
@@ -84,12 +114,47 @@ class Arranged:
     start: DataStart | None
 
 
-TRANSFORMS = {
-    None: lambda x: x,
-    "log": np.log,
-    "difference": lambda x: np.concatenate([[np.nan], np.diff(x)]),
-    "log_difference": lambda x: np.concatenate([[np.nan], np.diff(np.log(x))]),
-}
+def transform_series(text: str | None, x: np.ndarray) -> np.ndarray:
+    """Apply a transform written as an expression in the raw series `x`, such as "100 * log(x)" or "d(log(x))".
+
+    Allowed: numbers, x, x(-k) (the series k periods earlier, NaN before the start), d(...) for the change from the previous
+    period, + - * / ^, and log, exp, sqrt, abs.
+    """
+    if text is None:
+        return x
+    return np.asarray(_transform(parse_expression(text), np.asarray(x, dtype=float)), dtype=float) * np.ones(len(x))
+
+
+def _lagged(values, k: int):
+    out = np.full(len(values), np.nan)
+    if k < len(values):
+        out[k:] = values[:len(values) - k]
+    return out
+
+
+def _transform(expr: Expr, x: np.ndarray):
+    match expr:
+        case Num(value=value):
+            return float(value)
+        case Name(id="x"):
+            return x
+        case Shift(base=base, lag=lag):
+            k = int(_transform(lag, x))
+            if k > 0:
+                raise DataError("a transform cannot look into the future")
+            return _lagged(_transform(base, x), -k)
+        case Unary(op=op, operand=operand):
+            value = _transform(operand, x)
+            return -value if op == "-" else value
+        case Binary(op=op, left=left, right=right):
+            a, b = _transform(left, x), _transform(right, x)
+            return {"+": np.add, "-": np.subtract, "*": np.multiply, "/": np.divide, "^": np.power}[op](a, b)
+        case Call(func="d", args=(inner,)):
+            value = _transform(inner, x)
+            return value - _lagged(value, 1)
+        case Call(func=func, args=(inner,)) if func in ("log", "exp", "sqrt", "abs"):
+            return getattr(np, func)(_transform(inner, x))
+    raise DataError("a transform may use only x, x(-k), numbers, d(...), + - * / ^, log, exp, sqrt and abs")
 
 
 def arrange(system: System, dataset: Dataset, links: dict) -> Arranged:
@@ -98,9 +163,7 @@ def arrange(system: System, dataset: Dataset, links: dict) -> Arranged:
         if name not in dataset.series:
             raise DataError(f"the model needs the data series {name!r}, which the data does not have")
         transform = links[name].transform if name in links else None
-        if transform not in TRANSFORMS:
-            raise DataError(f"unknown transform {transform!r}; known: {sorted(t for t in TRANSFORMS if t)}")
-        return TRANSFORMS[transform](np.asarray(dataset.series[name], dtype=float))
+        return transform_series(transform, np.asarray(dataset.series[name], dtype=float))
 
     periods = len(dataset.dates)
     observed = np.stack([series(o.series) for o in system.observations], axis=1) if system.observations else np.zeros((periods, 0))
