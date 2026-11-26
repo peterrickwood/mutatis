@@ -34,3 +34,19 @@ positions, ranges and dates. A lag length is changed with `replace_equation`.
 
 **7. `diff` gives back the same edit for every single edit except `name_number`.** Naming a number shows up as an added parameter
 and a replaced equation, which has the same effect. Making it recognise `name_number` would mean guessing intent from text.
+
+**8. Every value from the future must be written inside `E(...)`.** `p(+1)` outside an expectation is an error. The
+expectation schemes work by rewriting `E(...)` terms, so an unmarked future value would silently escape them. A Dynare
+importer will wrap leads in `E(...)` automatically. Leads of more than one period, and leads of shocks or outside variables,
+are not supported yet.
+
+**9. Lags longer than one period become chains of extra variables, named `x@lag1`, `x@lag2`, ...; a shock or outside variable
+that appears lagged first gets a copy in the state, `b@now`.** This is the standard reduction to a system with one lag, and it
+keeps the solved model's step simple: next state from this state, this period's shocks and this period's outside variables.
+
+**10. The discounting factor of `discounted(m)` must be a model-level parameter.** It applies to every expectation in every
+block, so it belongs to the model, not to one block.
+
+**11. Compiled equations are evaluated by walking the syntax tree inside JAX, not by generating code.** JAX traces the walk once
+when a function is compiled, so there is no cost per evaluation, and the same tree serves for evaluation, derivatives (by
+automatic differentiation) and counting equations.

@@ -285,3 +285,28 @@ class Flat(Distribution):
 
     def sample(self, key, sample_shape=()):
         raise ValueError("a flat prior has no total probability and cannot be sampled")
+
+
+class JeffreysCovariance(Distribution):
+    """The conventional uninformative prior for an n-by-n covariance matrix, with density proportional to det(x)^(-(n+1)/2).
+
+    Not a probability distribution (no total probability, cannot be sampled), like `Flat`.
+    """
+
+    n: int = eqx.field(static=True)
+    proper = False
+
+    @property
+    def domain(self):
+        return PositiveDefinite()
+
+    @property
+    def event_shape(self):
+        return (self.n, self.n)
+
+    def log_prob(self, x):
+        sign, logdet = jnp.linalg.slogdet(x)
+        return _outside(-0.5 * (self.n + 1) * logdet, sign > 0)
+
+    def sample(self, key, sample_shape=()):
+        raise ValueError("the Jeffreys prior has no total probability and cannot be sampled")
