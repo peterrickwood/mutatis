@@ -210,3 +210,31 @@ forward-looking solve). Evidence: 0.36 GB and 0.93 s for that gradient; the valu
 against SciPy's solve_discrete_lyapunov is unchanged (residuals at rounding level up to a largest root of 0.99999).
 Derivatives match finite differences and agree between forward and reverse mode (fast tests), and are zero, not NaN, where
 the covariance does not exist.
+
+**38. Why SMC fails with many unknowns, as far as found; SMC is left unchanged pending a design decision.** Evidence on
+Gaussian targets with a known marginal likelihood (`experiments/smc_dimension_study.py`, `tests.infer.targets.NormalMean`, 2,000
+particles, 3 seeds): the log marginal likelihood is right to within 0.4 up to 50 unknowns, then +27 to +29 too high at 100 and
++4 to +21 at 200, while posterior means stay within 0.08 posterior standard deviations. Found, one change at a time (scratch
+experiments, recorded in the audit report; 100 unknowns and one seed unless stated):
+- *Not the adaptive temperatures:* fixing the schedule from an earlier run gave +27 to +31 (4 seeds).
+- *Not the moves' validity:* BlackJAX's HMC move left exact draws of the tempered posterior unchanged (spread 100.00 against
+  100), and one SMC step from exact draws kept the spread within 0.3%.
+- *The trajectory length:* the step size settles near 0.65 to 0.85, so 5 leapfrog steps make a trajectory of 3.3 to 4.3, close to
+  half the orbit period (pi) of a normal posterior in the mass matrix's units. A move then nearly reflects each particle through
+  the centre and keeps its distance from it: after 5 moves that distance's correlation with its starting value was 0.87 (0.00 for
+  a trajectory of 1.5). The acceptance rate swings between 0.4 and 0.95 as the step size crosses this, so the step-size rule
+  oscillates. The cloud ends up 3 to 10% too close to the centre (squared standardised distance) and each step's increment
+  comes out +0.1 to +0.6 too high. With the exact mass matrix and a fixed step: a 3.25 trajectory gave -17 to -33 (high
+  variance), a 1.5 trajectory -0.07 to -0.23 (3 seeds each).
+- *A random trajectory length is not enough:* drawing each move's number of leapfrog steps uniformly from 1 to ceil(pi / step
+  size) gave -1.73, -2.37 and +0.22 at 100 unknowns and within 0.7 at 1 to 50, but +39 to +47 at 200 (3 seeds), worse than now.
+  At 200 the cause is the mass matrix copying each unknown's spread from the particles: with the exact mass matrix, or the
+  particles' spread averaged over unknowns, the same run gave -5.2, while 8,000 particles did not help (+33). A plausible reading
+  (not proven): an unknown in which the cloud is by chance too narrow gets shorter moves and so stays narrow.
+- *The sampled-shock route (decision 26) fails differently:* random lengths alone changed nothing (sigma_eta 0.127 against 0.232
+  from the Kalman route). A full covariance mass matrix from the particles, with random lengths, gave 0.193 with 5 moves and
+  0.215 with 20 (log marginal likelihood -210.9 against -210.3): the posterior ties sigma_eta to all 200 standardised shocks,
+  which a diagonal mass matrix cannot follow.
+Nothing is changed in SMC: every fix tried helps one case and not another, and the remaining choices (full covariance mass
+matrices, regularising the per-unknown scales, a number of moves set by a measure of mixing, or NUTS for these problems) change
+every SMC result and need a decision.
