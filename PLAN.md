@@ -163,6 +163,8 @@ Order of work:
 
 Accepted when: all four toys run through the same code with no branch on model family; an edit to each toy produces a comparable second version; and the two experiments under Risks have been run and reported.
 
+**Status (2026-11-26): built.** Steps 1 to 11 are done, with a fifth fixture model written with templates. Both risk experiments have been run (see Risks): the forward-looking solve is fine; sampling the shocks needed NUTS chains instead of SMC. Acceptance: `tests/test_stage0_acceptance.py` (slow tier) estimates every toy through the one generic path and compares each with an edited version; see the decisions log for choices made along the way.
+
 ### Stage 1: Read's SVAR (demonstration 1)
 
 What the paper needs (from its public pages and read-me; not yet checked against the data file): four variables (cash rate, real GDP, trimmed-mean inflation, the trade-weighted exchange rate), four lags, quarterly data from 1984 to 2019, three outside variables that feed in but are not modelled (terms of trade, US GDP, the US policy rate), and six sets of restrictions. The sets restrict responses to a shock, coefficients of the interest-rate rule, and the relation of the shock to an outside measure of policy surprises. The data are public and ship with the paper. The original MATLAB code may be used with attribution; its read-me says the richest set of restrictions took about 18 hours to run.
@@ -172,6 +174,13 @@ Adds: lags at realistic size; outside variables that enter a model without being
 Second-consumer tests: a sign restriction on the forward-looking toy's response; bounds on a toy with a parameter the data cannot inform; the exact regression formula on the error-correction toy; an outside variable feeding the hidden-level toy.
 
 Accepted when: Read's results under the conventional prior and as ranges are both reproduced, and the paper's six sets of restrictions exist as six lists of edits to one base specification. Running time for the richest set is measured and reported; an 18-hour original means this may be a slow test even when correct.
+
+**Status (2026-11-26): Restrictions (1) to (5) run through the generic path; (6) does not yet.** `demos/read2022` holds only data: the model, a data manifest, the restriction sets as edit lists, the edit that removes the rotation's prior, a report list, and Read's published figure data. Each run takes about a minute (Read's MATLAB took hours for the simpler sets). Under Restriction (1) all 252 conventional statistics agree with Read's within sampling tolerance; range results agree except where Read's bounds are exactly zero at restricted horizons, which an independent optimiser shows are computed correctly here (decisions log, 28). `tests/test_stage1_read2022.py` (slow tier) checks all five sets both ways.
+
+Remaining for Restriction (6), all general capabilities:
+- The proxy as a variable of the model, with its own equation: a regression on the current VAR variables and the VAR's regressors. Read's proxy restrictions are then ordinary impact responses: the proxy responds positively to the policy shock, and more strongly to it than to any other shock.
+- The exact regression formula for several regressions with different regressors and different samples (the proxy exists only for 1994 to 2018), each with its own covariance.
+- Ranges when restrictions involve several columns of the rotation, which the one-column method cannot handle: a general optimiser over rotations with many starting points, checked against the one-column method where both apply.
 
 ### Stage 2: a textbook DSGE (demonstration 2)
 

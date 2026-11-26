@@ -69,3 +69,20 @@ def test_restricted_draws():
     draw = draw_restricted(lambda k, size: UniformOrthogonal(n).sample(k, (size,)), satisfied, jax.random.key(0))
     assert draw is not None and float(draw[0, 0]) >= 0.8
     assert draw_restricted(lambda k, size: UniformOrthogonal(n).sample(k, (size,)), lambda Q: Q[0, 0] > 1.5, jax.random.key(0), max_tries=1000) is None
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_optimised_bounds_reach_the_exact_ones_where_both_apply(seed):
+    # Risk 4 in PLAN.md: does the general search stop at a local best? Compare with the exact one-column method.
+    from mutatis.infer.identification import optimised_bounds
+
+    rng = np.random.default_rng(10 + seed)
+    n = 4
+    S, C = jnp.asarray(rng.normal(size=(3, n))), jnp.asarray(rng.normal(size=(2, n)))
+    lower, upper, empty = one_column_bounds(OneColumn(0, np.asarray(S), np.asarray(C)))
+    found_lower, found_upper, found_empty = optimised_bounds(lambda Q: S @ Q[:, 0], lambda Q: C @ Q[:, 0], n, jax.random.key(seed))
+    assert empty == found_empty
+    if not empty:
+        assert np.all(found_lower >= lower - 1e-8) and np.all(found_upper <= upper + 1e-8)   # never outside the true range
+        np.testing.assert_allclose(found_lower, lower, atol=1e-6)
+        np.testing.assert_allclose(found_upper, upper, atol=1e-6)

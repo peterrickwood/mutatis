@@ -147,3 +147,46 @@ def draw_restricted(sample_prior, satisfied, key, max_tries: int = 10_000, batch
             return candidates[int(np.argmax(ok))]
         tries += batch
     return None
+
+
+def _skew(parameters, n):
+    rows, cols = np.triu_indices(n, k=1)
+    upper = jnp.zeros((n, n)).at[rows, cols].set(parameters)
+    return upper - upper.T
+
+
+def optimised_bounds(restrictions, quantities, n: int, key, starts: int = 20, candidates: int = 4000):
+    """Smallest and largest value of every quantity over rotations that satisfy the restrictions, for restrictions and quantities
+    of any form: a search, so the result is an inner bound that may miss the true end if the search stops at a local best.
+
+    Starting points are allowed rotations found among `candidates` random ones; from the best `starts` for each bound, SLSQP
+    moves the rotation as Q exp(K) with K skew-symmetric, so every step stays a rotation. Returns (lower, upper, empty).
+    """
+    from scipy.optimize import minimize
+
+    pool = UniformOrthogonal(n).sample(key, (candidates,))
+    allowed = np.asarray(jax.vmap(lambda Q: jnp.all(restrictions(Q) >= 0))(pool))
+    if not allowed.any():
+        return None, None, True
+    feasible = pool[np.asarray(allowed)]
+    values = np.asarray(jax.vmap(quantities)(feasible))
+    lower, upper = values.min(axis=0), values.max(axis=0)
+    m = n * (n - 1) // 2
+    rotate = jax.jit(lambda Q, k: Q @ jax.scipy.linalg.expm(_skew(k, n)))
+    for i in range(values.shape[1]):
+        for sign, best in ((1.0, lower), (-1.0, upper)):
+            order = np.argsort(sign * values[:, i])[:starts]
+            objective = jax.jit(jax.value_and_grad(lambda k, Q: sign * quantities(rotate(Q, k))[i]))
+            constraint = jax.jit(lambda k, Q: restrictions(rotate(Q, k)))
+            constraint_jacobian = jax.jit(jax.jacfwd(lambda k, Q: restrictions(rotate(Q, k))))
+            for start in order:
+                Q0 = feasible[start]
+                result = minimize(lambda k: tuple(np.asarray(v, dtype=float) for v in objective(jnp.asarray(k), Q0)), np.zeros(m), jac=True,
+                                  method="SLSQP", constraints=[{"type": "ineq", "fun": lambda k: np.asarray(constraint(jnp.asarray(k), Q0)),
+                                                                "jac": lambda k: np.asarray(constraint_jacobian(jnp.asarray(k), Q0))}],
+                                  options={"maxiter": 200, "ftol": 1e-12})
+                Q = rotate(Q0, jnp.asarray(result.x))
+                if bool(jnp.all(restrictions(Q) >= -1e-9)):
+                    value = float(quantities(Q)[i])
+                    best[i] = min(best[i], value) if sign > 0 else max(best[i], value)
+    return lower, upper, False
