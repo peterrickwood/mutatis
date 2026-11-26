@@ -30,6 +30,8 @@ class SMCError(RuntimeError):
 def smc(problem, key, n_particles: int = 2000, n_mcmc_steps: int = 5, n_leapfrog: int = 5, target_ess: float = 0.5,
         target_acceptance: float = 0.65, initial_step_size: float = 0.5, max_steps: int = 1000) -> Posterior:
     """Sample a posterior problem (contract 2: `draw_prior`, `log_prior`, `log_likelihood`)."""
+    if not getattr(problem, "gradient_ready", True):
+        raise SMCError("SMC moves every unknown by gradients, but this problem has unknowns it cannot move (a rotation, or no prior)")
     key_prior, key_steps = jax.random.split(key)
     particles = jax.vmap(problem.draw_prior)(jax.random.split(key_prior, n_particles))
     if not bool(jnp.all(jnp.isfinite(particles))):

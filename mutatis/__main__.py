@@ -34,7 +34,7 @@ def main(argv=None) -> int:
     est.add_argument("--particles", type=int, help="SMC particles")
     est.add_argument("--draws", type=int, help="draws from the exact formula")
     est.add_argument("--route", default="auto", choices=["auto", "read_off", "kalman", "sample"])
-    est.add_argument("--method", default="auto", choices=["auto", "smc", "exact_regression"])
+    est.add_argument("--method", default="auto", choices=["auto", "smc", "nuts", "exact_regression"])
     cmp_ = commands.add_parser("compare", help="compare two stored results")
     cmp_.add_argument("first")
     cmp_.add_argument("second")

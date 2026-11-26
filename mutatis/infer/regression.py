@@ -23,9 +23,9 @@ import jax.numpy as jnp
 import numpy as np
 
 from mutatis import _jax_config  # noqa: F401
+from mutatis.quantities.recover import recover_shocks
 from mutatis.dist import InverseWishart
 from mutatis.dist.domains import PositiveDefinite, Real
-from mutatis.infer import routes
 from mutatis.infer.posterior import Posterior
 
 
@@ -50,7 +50,7 @@ def _errors(problem, values: dict):
     params = {k: v for k, v in values.items() if k in problem.system.parameters}
     solved = problem.solve(params)
     form = solved.linear_form()
-    _, states = routes.recover_shocks(solved, problem.observed, problem.outside, problem.start_state)
+    _, states = recover_shocks(solved, problem.observed, problem.outside, problem.start_state)
     previous = jnp.concatenate([problem.start_state[None], states[:-1]])
     predicted = form.kappa + previous @ form.P.T + problem.outside @ form.R.T
     return problem.observed - form.d - predicted @ form.Z.T

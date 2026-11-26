@@ -111,3 +111,10 @@ a checksum, the file inside a zip, the sheet, and the sample. Files are cached o
 first case is Read's VARData.xlsx: the RBA licenses its papers under CC BY 4.0 but excludes third-party material, and the file
 compiles ABS, US and academic series. Checksums must be quoted in the YAML, because a checksum made only of digits would
 otherwise be read as a number.
+
+**26. Problems with sampled shocks use NUTS chains, not SMC; their marginal likelihood is not reported.** Evidence (risk
+experiment 1, `experiments/sample_route_diagnosis.py`): on the hidden-level toy with 200 periods, a NUTS chain on the sampled-shock
+posterior matched the Kalman route (sigma_eta 0.232 against 0.233), while SMC gave 0.097, 0.132 and 0.172 with moves of 5x5,
+20x10 and 50x20 steps. On a 200-dimension normal target SMC's posterior was roughly right but its log marginal likelihood was off
+by +19.7. Standardising the shocks (now done anyway) did not change this. The cost: NUTS does not move between separated peaks
+and gives no marginal likelihood, so versions estimated this way cannot be compared by marginal likelihood until SMC improves.

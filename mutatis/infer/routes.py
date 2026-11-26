@@ -58,22 +58,6 @@ def read_off(solved: SolvedModel, observed, outside, start_state):
     return _guard(solved, jnp.sum(log_probs) - observed.shape[0] * log_det)
 
 
-def recover_shocks(solved: SolvedModel, observed, outside, start_state):
-    """The shocks and states implied by the data, for the `read_off` route."""
-    form = solved.linear_form()
-    ZQ = form.Z @ form.Q
-
-    def period(state, inputs):
-        y, z = inputs
-        predicted = form.kappa + form.P @ state + form.R @ z
-        shocks = jnp.linalg.solve(ZQ, y - form.d - form.Z @ predicted)
-        following = predicted + form.Q @ shocks
-        return following, (shocks, following)
-
-    _, (shocks, states) = jax.lax.scan(period, start_state, (observed, outside))
-    return shocks, states
-
-
 def sample(solved: SolvedModel, observed, outside, shocks, start_state):
     def period(state, inputs):
         y, z, e = inputs

@@ -150,7 +150,12 @@ class PositiveDefinite(Domain):
 
 
 class Orthogonal(Domain):
-    """Orthogonal n-by-n matrices: x' x = I. No map to unconstrained numbers is provided."""
+    """Orthogonal n-by-n matrices: x' x = I.
+
+    There is no smooth map from unconstrained numbers onto all of them, so `has_transform` is False and gradient samplers must
+    not move them. For storage alongside other unknowns, a matrix is simply flattened (`to_unconstrained`) and reshaped back
+    (`to_constrained`); methods that draw such unknowns directly use this.
+    """
 
     tolerance: float = 1e-8
     has_transform = False
@@ -160,7 +165,17 @@ class Orthogonal(Domain):
         return jnp.max(jnp.abs(jnp.swapaxes(x, -1, -2) @ x - jnp.eye(n))) < self.tolerance
 
     def unconstrained_size(self, shape):
-        raise ValueError("orthogonal matrices have no map to unconstrained numbers; draw them directly")
+        _square_size(shape)
+        return shape[0] * shape[1]
+
+    def to_constrained(self, z, shape):
+        return jnp.reshape(z, shape)
+
+    def to_unconstrained(self, x):
+        return jnp.ravel(x)
+
+    def log_det_jacobian(self, z, shape):
+        return jnp.zeros(())
 
 
 def _square_size(shape: tuple[int, ...]) -> int:

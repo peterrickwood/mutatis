@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 
 from mutatis import _jax_config  # noqa: F401
-from mutatis.infer import routes
+from mutatis.quantities.recover import recover_shocks
 from mutatis.infer.problem import PosteriorProblem, _initial_from_standard
 from mutatis.numerics.kalman import kalman_filter, rts_smoother
 
@@ -14,7 +14,7 @@ def hidden_states(problem: PosteriorProblem, z):
     params = {k: v for k, v in values.items() if k in problem.system.parameters}
     solved = problem.solve(params)
     if problem.route == "read_off":
-        return routes.recover_shocks(solved, problem.observed, problem.outside, problem.start_state)[1]
+        return recover_shocks(solved, problem.observed, problem.outside, problem.start_state)[1]
     if problem.route == "sample":
         start = _initial_from_standard(solved, values["initial"]) if problem.start == "model" else problem.start_state
         states, state = [], start

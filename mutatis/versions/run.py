@@ -22,6 +22,7 @@ from mutatis import _jax_config  # noqa: F401
 from mutatis.infer.estimate import estimate
 from mutatis.infer.posterior import Posterior
 from mutatis.infer.regression import regression_posterior
+from mutatis.infer.nuts import nuts
 from mutatis.infer.smc import smc
 from mutatis.measure.data import Dataset
 from mutatis.spec.diff import diff
@@ -84,8 +85,9 @@ def run(model: Model, dataset: Dataset, store: str | Path = "results", edits: li
         method: str = "auto", **options) -> Result:
     edited = apply_edits(model, edits)
     problem = prepare(edited, dataset, route=route)
-    method = ("smc" if problem.proper else "exact_regression") if method == "auto" else method
-    sampler = {"smc": smc, "exact_regression": regression_posterior}[method]
+    if method == "auto":
+        method = "exact_regression" if not problem.proper else "nuts" if problem.route == "sample" else "smc"
+    sampler = {"smc": smc, "nuts": nuts, "exact_regression": regression_posterior}[method]
     defaults = {k: v.default for k, v in inspect.signature(sampler).parameters.items() if v.default is not inspect.Parameter.empty}
     settings = {"route": problem.route, "start": problem.start, "method": method, **defaults, **options}  # every setting, defaults included
     folder = Path(store) / run_key(edited, dataset, settings, seed)

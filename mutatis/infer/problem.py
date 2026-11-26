@@ -45,6 +45,7 @@ class Unknown:
     prior: DistributionSpec | None   # None for shocks and the starting state, whose distributions come from the solved model
     offset: int
     size: int                        # length of its unconstrained part of z
+    no_prior: bool = False           # restricted, with no prior behind it: results are reported as ranges
 
 
 @dataclass(frozen=True)
@@ -75,7 +76,9 @@ class PosteriorProblem:
         self.system, self.solve, self.data, self.route, self.start, self.layout = system, solve, data, route, start, layout
         self.observed, self.outside, self.start_state = observed, outside, start_state
         self.parameter_unknowns = tuple(u for u in layout.unknowns if u.prior is not None)
-        self.proper = all(u.prior.proper for u in self.parameter_unknowns)
+        self.no_prior_unknowns = tuple(u for u in layout.unknowns if u.no_prior)
+        self.proper = all(u.prior.proper for u in self.parameter_unknowns) and not self.no_prior_unknowns
+        self.gradient_ready = all(u.domain.has_transform for u in layout.unknowns) and not self.no_prior_unknowns
 
     @property
     def size(self) -> int:
@@ -124,7 +127,7 @@ class PosteriorProblem:
     def draw_prior(self, key) -> jax.Array:
         """One draw of z from the prior. Every prior must be proper."""
         if not self.proper:
-            raise ProblemError("cannot draw from an improper prior (flat or jeffreys); use the exact formula instead")
+            raise ProblemError("cannot draw from an improper prior (flat or jeffreys) or from a parameter with no prior; use the exact formula instead")
         values = dict(self.layout.fixed)
         keys = jax.random.split(key, len(self.layout.unknowns) + 2)
         for u, subkey in zip(self.parameter_unknowns, keys):
@@ -186,14 +189,10 @@ def build_problem(system: System, solve: Callable[[dict], SolvedModel], data: Ar
     for key, info in system.parameters.items():
         if info.kind == "fixed":
             fixed[key] = info.fixed_value
-        elif info.kind == "no_prior":
-            raise ProblemError(f"{key} has no prior: results for it are reported as ranges, which needs the bounds method (not built yet)")
-        else:
-            if not info.domain.has_transform:
-                raise ProblemError(f"{key} lives in a domain ({type(info.domain).__name__}) that gradient samplers cannot move through")
-            size = info.domain.unconstrained_size(info.shape)
-            unknowns.append(Unknown(key, info.shape, info.domain, info.prior, offset, size))
-            offset += size
+            continue
+        size = info.domain.unconstrained_size(info.shape)
+        unknowns.append(Unknown(key, info.shape, info.domain, info.prior, offset, size, info.kind == "no_prior"))
+        offset += size
     if route == "sample":
         shape = (observed.shape[0], len(system.shock_labels))
         unknowns.append(Unknown("shocks", shape, Real(), None, offset, math.prod(shape)))

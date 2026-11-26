@@ -58,10 +58,12 @@ def test_contains():
     assert not bool(PositiveDefinite().contains(jnp.array([[2.0, 1.0], [0.0, 2.0]])))  # not symmetric
 
 
-def test_orthogonal_domain_has_no_transform():
+def test_orthogonal_domain_is_stored_flat_but_has_no_transform():
     q, _ = jnp.linalg.qr(jnp.asarray(np.random.default_rng(0).normal(size=(4, 4))))
     assert bool(Orthogonal().contains(q))
     assert not bool(Orthogonal().contains(q + 1e-3))
-    assert not Orthogonal.has_transform
+    assert not Orthogonal.has_transform  # gradient samplers must not move it
+    assert Orthogonal().unconstrained_size((4, 4)) == 16
+    np.testing.assert_array_equal(Orthogonal().to_constrained(Orthogonal().to_unconstrained(q), (4, 4)), q)
     with pytest.raises(ValueError):
-        Orthogonal().unconstrained_size((4, 4))
+        Orthogonal().unconstrained_size((4, 3))
