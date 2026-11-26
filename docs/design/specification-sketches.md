@@ -458,10 +458,10 @@ One format covers all seven cases, with the additions below. Nothing needed a mo
 
 ## Questions for you
 
-1. **One equation per output, per block.** Each block names the variables its equations determine, and must have exactly that many equations. That makes counting checkable block by block. The cost is that a market-clearing condition has to be assigned to some block, which then "determines" a price or quantity. Agree?
+1. **One equation per output, per block.** *Decided: yes.* Each block names the variables its equations determine, and must have exactly that many equations. That makes counting checkable block by block, gives `replace_block` and *isolate* a precise meaning, and costs some bookkeeping: a market-clearing condition goes in a small block that "determines" the price or quantity it pins down. The assignment never changes the solution, because all equations are solved together. An importer can make the assignment automatically by matching equations to variables. The alternatives considered were counting only for the whole model, as Dynare does, and model-level market-clearing conditions, as the sequence-space Jacobian toolkit does.
 2. **Naming every number.** Should the convention be that every number that is a modelling choice is a named parameter, as in the MARTIN excerpt, while pure constants such as 100 stay as numbers? The alternative is to leave published numbers bare and accept that they cannot be relaxed by an edit.
 3. **Small changes inside an equation.** *Decided: yes.* There is a `replace_equation` edit, so untying MARTIN's `(1 - 0.15 - α1 - α2)` does not mean replacing the whole block.
-4. **Templates, `extend_set`, `bind` and `untie`.** They make the housing expansion a short list of edits, but they are the most complex part of the format. Keep them in the design now, even though stage 4 is the first to need them?
+4. **Templates, `extend_set`, `bind` and `untie`.** *Decided: they are part of the design now.* Both RBA multi-sector models are written as equations repeated over lists of sectors (the 2015 base model "for j ∈ {n, m, z}", the 2018 housing model with h added), so templates match the source material. When they are built is still to be confirmed.
 5. **The base 2015 model.** Its code does not appear to be public from the RBA. PLAN.md says demonstration 3 has "a published answer on both sides". That may not hold. This does not block stage 0, but before stage 4 we need either the base code from elsewhere, or a different second side.
 
 ## Sources
