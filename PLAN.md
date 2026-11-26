@@ -184,6 +184,8 @@ Remaining for Restriction (6), all general capabilities:
 - The exact regression formula for several regressions with different regressors and different samples (the proxy exists only for 1994 to 2018), each with its own covariance. Proposed design: read each block's errors straight from its own equations at the data (the block's residual with its shocks set to zero), instead of from the solved model. That needs every variable the block uses to be observed exactly, allows each block its own sample, and is the same mechanism as *isolate* (stage 5) and MARTIN's equation-by-equation estimation (stage 6), so it would be built once for all three.
 - Ranges when restrictions involve several columns of the rotation, which the one-column method cannot handle: a general optimiser over rotations with many starting points, checked against the one-column method where both apply.
 
+**To do later: a thorough written report on the replication of Read (2022).** What was reproduced and how it was checked, set by set; every difference from the published results and its cause (with the evidence and our confidence in it), including where his range bounds are not exact; what could not be reproduced and why; running times against the original's.
+
 ### Stage 2: a textbook DSGE (demonstration 2)
 
 Adds: steady state at realistic size; linearisation by automatic derivatives; the linear forward-looking solve with failure statuses, in a sampler that crosses the boundary of the stable region; priors on parameters at scale; Dynare import for a simple model; expectation schemes beyond rational.
