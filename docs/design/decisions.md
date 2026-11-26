@@ -240,10 +240,36 @@ matrices, regularising the per-unknown scales, a number of moves set by a measur
 every SMC result and need a decision.
 
 **39. The Kalman filter's covariance update: switch from the Joseph form to the standard form only if the standard form
-passes checks with exactly observed series (agreed in discussion 2026-11-26; check under way).** The audit found that the
-standard update makes likelihood gradients 1.6 to 1.7 times faster at 20 to 50 states. The Joseph form is in use because it keeps
-the covariance positive semi-definite when some series are observed exactly, where the standard form can lose that through
-rounding. So the switch is made only if, on cases with exactly observed series, singular state noise, roots near the unit circle
-and long samples, the standard form keeps the covariance valid and gives the same likelihood and gradients as the Joseph form.
-Otherwise the Joseph form stays. Revisit if exactly observed series ever give an invalid covariance or a likelihood that differs
-from the reference. Alternative: keep the Joseph form and accept the slower gradients.
+passes checks with exactly observed series (agreed in discussion 2026-11-26; checked 2026-11-26: it failed, so the Joseph form
+stays).** The audit found that the standard update makes likelihood gradients 1.6 to 1.7 times faster at 20 to 50 states. The
+Joseph form is in use because it keeps the covariance positive semi-definite when some series are observed exactly, where the
+standard form can lose that through rounding. So the switch is made only if, on cases with exactly observed series, singular
+state noise, roots near the unit circle and long samples, the standard form keeps the covariance valid and gives the same
+likelihood and gradients as the Joseph form. Otherwise the Joseph form stays.
+The check (scratch; the standard form written as P - U'U with U = L^-1 Z P, F = L L'): 160 cases with 2, 20 and 50 states, 1 to 49
+exactly observed series, state noise of rank 1 to full, largest roots 0.99 to 0.99999, 1,000 and 5,000 periods, none or 20%
+missing, starting from the stationary covariance. Required in advance: every filtered covariance's smallest eigenvalue at least
+-1e-10 times its largest; likelihood within 1e-9 and gradients within 1e-7 of the Joseph form's; nothing NaN or infinite.
+- *Covariance: failed.* In 11 cases the standard form broke the limit where the Joseph form did not. Worst: 20 states, 19 observed
+  exactly, noise of full rank, root 0.99999, 1,000 periods. Smallest eigenvalue -1.2e-8 times the largest, and past the limit
+  in 153 of the 1,000 periods, not only the first; the Joseph form's worst there was -4.5e-16. Also 50 states with 49 observed
+  exactly: -7.0e-10 (full-rank noise), -6.0e-9 (rank 49).
+- *Cause:* the standard form subtracts from the predicted covariance, so its rounding error is a fraction of the predicted
+  covariance (at most 7.4e-13 of it in the 11 cases). Exactly observed series can leave a filtered covariance a thousand to a
+  million times smaller than that, and then the same error is large next to it. The Joseph form's error stays proportional to
+  its result.
+  One update checked against 50-digit arithmetic (2 states, root 0.99999; the exact smallest eigenvalue is 0): Joseph +2e-19,
+  standard -1.0e-11 (-1.07e-10 of its largest), and the textbook way of writing it, P - K Z P, -1.7e-11.
+- *Where both fail:* with as many exact series as shocks, the filtered covariance can shrink towards zero as the state becomes
+  known, and then both forms break the limit (19 cases). In one such case per size, the Joseph form did so only in periods where
+  the filtered covariance was below 2e-13 (2 states), 1e-10 (20) or 5e-10 (50) of the predicted one; the standard form already
+  at 1.3e-6, 5.2e-6 and 2.5e-6. With more exact series than shocks the model has no likelihood; both forms gave NaN within 7
+  periods.
+- *Likelihood, gradients, NaN: passed.* Likelihoods agreed to 1.8e-12 relative; gradients to 4.6e-8 of each block's largest
+  entry; nothing NaN or infinite. Entry by entry, small gradient entries differ by up to 4.4e-4 of themselves; finite
+  differences were too coarse to say which form is right there.
+- *Speed* (gradient with respect to T, W, Z and H, vmapped over 2,000 parameter values, 150 periods): 0.73 s against 0.49 s at 2
+  states, 9.1 s against 5.8 s at 20, 43.1 s against 28.6 s at 50 (Joseph against standard: 1.5 to 1.6 times). Compile times
+  similar (0.4 to 1.9 s).
+Revisit if gradient time at DSGE size becomes the limit. Alternative: the standard form, 1.5 times faster, with covariances
+accurate relative to the predicted covariance rather than to themselves.
