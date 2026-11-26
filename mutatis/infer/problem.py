@@ -5,8 +5,11 @@ A posterior problem is a vector of unconstrained numbers z, a log prior and a lo
 which unknown. `build_problem` assembles one from a compiled system, a solver (a function from parameter values to a solved
 model, so that this layer never depends on how models are solved), and arranged data.
 
-The unknowns are the parameters that have a prior; with the `sample` route also every period's shocks, and, when the starting
-state is not read from the data, a standard normal vector u that gives it as mean + L u (see `_initial_from_standard`). Fixed parameters are constants. Parameters with no prior need the bounds route, which comes
+The unknowns are the parameters that have a prior; with the `sample` route also every period's shocks, in standard form (the
+shocks are shocks_from_standard(u), see contract 1), and, when the starting state is not read from the data, a standard normal
+vector u that gives it as mean + L u (see `_initial_from_standard`). Standard forms keep the sampler's geometry from changing
+with the parameters, which matters: with the shocks themselves as unknowns, SMC returned confidently wrong posteriors (risk
+experiment 1, PLAN.md). Fixed parameters are constants. Parameters with no prior need the bounds route, which comes
 with the first demonstration.
 """
 
@@ -91,8 +94,9 @@ class PosteriorProblem:
             log_prior = log_prior + jnp.sum(u.prior.build(params).log_prob(values[u.name]))
         solved = self.solve(params)
         if self.route == "sample":
-            shocks = values["shocks"]
-            log_prior = log_prior + jnp.sum(jax.vmap(solved.shock_log_prob)(shocks))
+            standard = values["shocks"]
+            log_prior = log_prior + jnp.sum(jax.vmap(solved.standard_log_prob)(standard))
+            shocks = jax.vmap(solved.shocks_from_standard)(standard)
             if self.start == "model":
                 standard = values["initial"]
                 start = _initial_from_standard(solved, standard)
@@ -129,7 +133,7 @@ class PosteriorProblem:
             values[u.name] = dist.sample(subkey) if dist.event_shape else dist.sample(subkey, u.shape)
         if self.route == "sample":
             solved = self.solve({k: v for k, v in values.items() if k in self.system.parameters})
-            values["shocks"] = solved.sample_shocks(keys[-2], self.observed.shape[0])
+            values["shocks"] = solved.sample_standard(keys[-2], self.observed.shape[0])
             if self.start == "model":
                 values["initial"] = jax.random.normal(keys[-1], (self.system.n_variables,))
         return self.layout.unconstrain(values)

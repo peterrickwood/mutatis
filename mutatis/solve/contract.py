@@ -57,6 +57,18 @@ class SolvedModel(eqx.Module):
     def sample_shocks(self, key, n_periods: int):
         raise NotImplementedError
 
+    # Shocks in standard form (see `mutatis.dist.Distribution.standard`): shocks = shocks_from_standard(u), where u's
+    # distribution does not depend on the parameters. Samplers that treat shocks as unknowns move u.
+
+    def shocks_from_standard(self, standard):
+        raise NotImplementedError
+
+    def standard_log_prob(self, standard) -> jax.Array:
+        raise NotImplementedError
+
+    def sample_standard(self, key, n_periods: int):
+        raise NotImplementedError
+
     def error_log_prob(self, observed, predicted) -> jax.Array:
         """Log probability of one period's measurement errors, over series that have them and are not missing (NaN)."""
         raise NotImplementedError

@@ -104,3 +104,20 @@ def test_density_moved_to_unconstrained_numbers_integrates_to_one(dist):
     log_jacobian = jax.vmap(lambda v: dist.domain.log_det_jacobian(v[None], ()))(z)
     total = jnp.trapezoid(jnp.exp(dist.log_prob(x) + log_jacobian), z)
     np.testing.assert_allclose(total, 1.0, rtol=1e-6)
+
+
+@pytest.mark.parametrize("dist", [Normal(0.3, 1.7), StudentT(4.0, -0.5, 2.0), Gamma(2.0, 1.0)], ids=lambda d: type(d).__name__)
+def test_standard_form_moves_the_density_correctly(dist):
+    # x = from_standard(u) is an increasing map, so the density of x is that of u divided by dx/du.
+    u = jnp.linspace(-2.0, 2.0, 9) if not isinstance(dist, Gamma) else jnp.linspace(0.2, 3.0, 9)
+    x = dist.from_standard(u)
+    slope = jax.vmap(jax.grad(lambda v: dist.from_standard(v)))(u)
+    np.testing.assert_allclose(dist.log_prob(x), dist.standard().log_prob(u) - jnp.log(slope), rtol=1e-12)
+
+
+def test_standard_form_of_a_multivariate_normal():
+    mean, cov = jnp.array([1.0, -2.0]), jnp.array([[2.0, 0.3], [0.3, 0.5]])
+    dist = MultivariateNormal(mean, cov)
+    draws = dist.from_standard(dist.standard().sample(jax.random.key(4), (N_DRAWS,)))
+    assert_mean_matches(draws, np.asarray(mean))
+    assert_covariance_matches(draws, mean, cov)

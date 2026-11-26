@@ -19,7 +19,7 @@ def hidden_states(problem: PosteriorProblem, z):
         start = _initial_from_standard(solved, values["initial"]) if problem.start == "model" else problem.start_state
         states, state = [], start
         for t in range(problem.observed.shape[0]):
-            state = solved.step(state, values["shocks"][t], problem.outside[t])
+            state = solved.step(state, solved.shocks_from_standard(values["shocks"][t]), problem.outside[t])
             states.append(state)
         return jnp.stack(states)
     form, noise = solved.linear_form(), solved.gaussian_noise()

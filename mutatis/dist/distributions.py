@@ -43,6 +43,16 @@ class Distribution(eqx.Module):
     def sample(self, key: PRNGKeyArray, sample_shape: tuple[int, ...] = ()) -> Float[Array, "..."]:
         raise NotImplementedError
 
+    # Standard form. A location-scale family is a fixed "standard" distribution moved and stretched: x = location + scale * u.
+    # Samplers move u rather than x, because u's distribution does not change as the location and scale do. Families without a
+    # standard form use themselves, so x = u.
+
+    def standard(self) -> "Distribution":
+        return self
+
+    def from_standard(self, u):
+        return u
+
 
 def _outside(log_density, inside):
     return jnp.where(inside, log_density, -jnp.inf)
@@ -63,6 +73,12 @@ class Normal(Distribution):
     def sample(self, key, sample_shape=()):
         shape = sample_shape + jnp.broadcast_shapes(jnp.shape(self.loc), jnp.shape(self.scale))
         return self.loc + self.scale * jax.random.normal(key, shape)
+
+    def standard(self):
+        return Normal(0.0, 1.0)
+
+    def from_standard(self, u):
+        return self.loc + self.scale * u
 
 
 class HalfNormal(Distribution):
@@ -170,6 +186,12 @@ class StudentT(Distribution):
         shape = sample_shape + jnp.broadcast_shapes(jnp.shape(self.df), jnp.shape(self.loc), jnp.shape(self.scale))
         return self.loc + self.scale * jax.random.t(key, self.df, shape)
 
+    def standard(self):
+        return StudentT(self.df, 0.0, 1.0)
+
+    def from_standard(self, u):
+        return self.loc + self.scale * u
+
 
 class Uniform(Distribution):
     low: Number = 0.0
@@ -208,6 +230,13 @@ class MultivariateNormal(Distribution):
         L = jnp.linalg.cholesky(self.cov)
         z = jax.random.normal(key, sample_shape + self.event_shape)
         return self.mean + z @ L.T
+
+    def standard(self):
+        n = self.event_shape[0]
+        return MultivariateNormal(jnp.zeros(n), jnp.eye(n))
+
+    def from_standard(self, u):
+        return self.mean + u @ jnp.linalg.cholesky(self.cov).T
 
 
 class InverseWishart(Distribution):

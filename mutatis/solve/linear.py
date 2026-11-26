@@ -69,6 +69,27 @@ class LinearSolved(SolvedModel):
             out = out.at[:, np.array(positions, dtype=int)].set(draws.reshape(n_periods, -1))
         return out
 
+    def _slots(self):
+        return zip(self.shock_dists, (np.array(p, dtype=int) for p in self.shock_positions), self.shock_shapes)
+
+    def shocks_from_standard(self, standard):
+        shocks = jnp.zeros_like(standard)
+        for dist, index, shape in self._slots():
+            shocks = shocks.at[index].set(jnp.reshape(dist.from_standard(standard[index].reshape(shape)), -1))
+        return shocks
+
+    def standard_log_prob(self, standard):
+        return sum(jnp.sum(dist.standard().log_prob(standard[index].reshape(shape))) for dist, index, shape in self._slots())
+
+    def sample_standard(self, key, n_periods):
+        k = sum(len(p) for p in self.shock_positions)
+        out = jnp.zeros((n_periods, k))
+        for (dist, index, shape), subkey in zip(self._slots(), jax.random.split(key, len(self.shock_dists))):
+            standard = dist.standard()
+            draws = standard.sample(subkey, (n_periods,)) if standard.event_shape else standard.sample(subkey, (n_periods, *shape))
+            out = out.at[:, index].set(draws.reshape(n_periods, -1))
+        return out
+
     def error_log_prob(self, observed, predicted):
         total = jnp.zeros(())
         for i, dist in enumerate(self.error_dists):
