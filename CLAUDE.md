@@ -31,3 +31,9 @@ Anything those documents mark as *proposed* or list as an open question is undec
 - **Get the building blocks right.** The central design question is always which primitives exist and how they combine. Prefer small parts behind narrow contracts, so that assumptions and methods can be swapped.
 - **Prefer the general mechanism.** Do not hard-wire a specific method where a general one will do, even at some cost in speed (README, core idea 4).
 - **Test every method in isolation.** Each numerical method gets unit tests that need no whole model. Whole-model tests are few, slow, and not run by default.
+
+## Development
+
+- The environment is `.venv/` in the repo (CPU JAX, 64-bit floats). Install with `.venv/bin/pip install -e ".[dev]"`.
+- Test tiers: plain `.venv/bin/python -m pytest` runs only the fast tier; `-m medium` and `-m slow` run the others. Run only the tests for the area you touched.
+- `tests/architecture/` holds the automatic checks: import rules between layers, no model-family names in the core, no code in `demos/`.

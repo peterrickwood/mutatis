@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mutatis"
+version = "0.0.0"
+description = "A laboratory for economic models: change one assumption, re-estimate, compare."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = [
+    "jax>=0.12",
+    "blackjax>=1.7",
+    "optimistix>=0.1",
+    "lineax>=0.1",
+    "equinox>=0.13",
+    "jaxtyping>=0.3",
+    "sympy>=1.14",
+    "pyyaml>=6",
+    "numpy>=2",
+    "scipy>=1.14",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9",
+    "hypothesis>=6",
+    "statsmodels>=0.14",
+]
+
+[tool.setuptools.packages.find]
+include = ["mutatis*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Three tiers. Plain `pytest` runs only the fast tier; `pytest -m medium` or `pytest -m slow` runs the others.
+markers = [
+    "medium: agreement between methods on small models, and sampler calibration. Run on request and before a milestone is accepted.",
+    "slow: replication of a demonstration against stored reference results. Run at milestones only.",
+]
+addopts = "-m 'not medium and not slow' --strict-markers"
