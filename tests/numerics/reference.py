@@ -34,6 +34,75 @@ def stable_solution(A, B, C, D):
     return np.real(P), np.real(Q)
 
 
+def qz_solution(A, B, C, D, margin):
+    """P and Q from SciPy's ordered QZ decomposition (Klein's method), and the number of roots inside the unit circle.
+
+    The pencil of the first-order form is reordered so the roots smaller than 1 + `margin` in size come first; the first n
+    columns of the right Schur vectors then span the non-exploding solutions, z = [x(t-1), x(t)], so x(t) = Z21 Z11^-1 x(t-1).
+    P and Q are None unless exactly n roots are inside.
+    """
+    A, B, C, D = map(np.asarray, (A, B, C, D))
+    n = A.shape[0]
+    F = np.block([[np.zeros((n, n)), A], [np.eye(n), np.zeros((n, n))]])
+    G = np.block([[-C, -B], [np.zeros((n, n)), np.eye(n)]])
+    inside = lambda alpha, beta: np.abs(alpha) < (1 + margin) * np.abs(beta)
+    _, _, alpha, beta, _, Z = scipy.linalg.ordqz(G, F, sort=inside, output="complex")
+    count = int(np.sum(inside(alpha, beta)))
+    if count != n:
+        return None, None, count
+    P = np.real(Z[n:, :n] @ np.linalg.inv(Z[:n, :n]))
+    return P, -np.linalg.solve(A @ P + B, D), count
+
+
+def structured_model(rng, inside, outside_inverse, k=2):
+    """A random model (A, B, C, D) whose non-exploding solution P is known, allowing static equations and unlagged variables.
+
+    The matrix polynomial is built as (lambda A + M)(lambda I - P), so its roots are the eigenvalues of P (`inside`; zeros are
+    variables that do not appear lagged) and -1/mu for the eigenvalues mu of M^-1 A (`outside_inverse`; zeros make A singular,
+    which puts roots at infinity, as static equations do). Complex values in `inside` must come in adjacent conjugate pairs.
+    """
+    n = len(inside)
+
+    def with_eigenvalues(values):
+        J, i = np.zeros((n, n)), 0
+        while i < n:
+            if np.imag(values[i]) != 0:  # a conjugate pair becomes a real 2 x 2 rotation-and-scaling block
+                a, b = np.real(values[i]), np.imag(values[i])
+                J[i:i + 2, i:i + 2] = [[a, -b], [b, a]]
+                i += 2
+            else:
+                J[i, i] = np.real(values[i])
+                i += 1
+        V = rng.normal(size=(n, n))
+        return V @ J @ np.linalg.inv(V)
+
+    P = with_eigenvalues(np.asarray(inside, dtype=complex))
+    M = rng.normal(size=(n, n)) + np.sqrt(n) * np.eye(n)
+    A = M @ with_eigenvalues(np.asarray(outside_inverse, dtype=complex))
+    return A, M - A @ P, -M @ P, rng.normal(size=(n, k)), P
+
+
+def sylvester_matrix(M, A, P):
+    """The n^2 x n^2 matrix of the map X -> M X + A X P, acting on X flattened row by row."""
+    n = M.shape[0]
+    return np.kron(M, np.eye(n)) + np.kron(A, P.T)
+
+
+def series_amplification(M, A, P):
+    """The sum over j of |F^j| |P^j| with F = -M^-1 A: how much summing X = sum_j F^j (M^-1 R) P^j can magnify rounding errors.
+
+    Frobenius norms; the sum stops once a term is below 1e-12 of the total, which is ample for an order of magnitude.
+    """
+    F = -np.linalg.solve(M, A)
+    total, Fj, Pj = 0.0, np.eye(len(M)), np.eye(len(M))
+    while True:
+        term = np.linalg.norm(Fj) * np.linalg.norm(Pj)
+        total += term
+        if term < 1e-12 * total:
+            return total
+        Fj, Pj = Fj @ F, Pj @ P
+
+
 def model_with_known_solution(n, inside, outside, rng, k=2):
     """A random model whose unique non-exploding solution is known.
 

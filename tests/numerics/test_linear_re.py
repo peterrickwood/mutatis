@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from mutatis.numerics.linear_re import cyclic_reduction, roots, solve_backward, solve_forward_looking, sylvester_matrix
+from mutatis.numerics.linear_re import cyclic_reduction, roots, solve_backward, solve_forward_looking, solve_sylvester
 from mutatis.numerics.status import Status
 from tests.numerics import reference
 
@@ -146,10 +146,26 @@ def test_roots_match_scipy(seed):
         np.testing.assert_allclose(unmatched.pop(nearest), root, rtol=1e-8)
 
 
-def test_sylvester_matrix_matches_the_map_it_represents():
-    rng = np.random.default_rng(3)
-    M, A, P, X = (jnp.asarray(rng.normal(size=(4, 4))) for _ in range(4))
-    np.testing.assert_allclose(sylvester_matrix(M, A, P) @ X.ravel(), (M @ X + A @ X @ P).ravel(), rtol=1e-12)
+@pytest.mark.parametrize("n", [1, 3, 8, 20])
+@pytest.mark.parametrize("gap", [0.5, 1e-2, 1e-4])
+def test_sylvester_solve_matches_the_dense_reference(n, gap):
+    # The derivative's equation M X + A X P = R, with M = A P + B from a model whose largest inside root and smallest outside
+    # root are 1 - gap and 1 + gap: the closer they are, the more doublings and the worse the equation's conditioning.
+    rng = np.random.default_rng(n)
+    inside = rng.uniform(-0.9, 0.9, n)
+    outside_inverse = rng.choice([-1, 1], n) / rng.uniform(1.1, 3.0, n)
+    inside[0], outside_inverse[0] = 1 - gap, -1 / (1 + gap)
+    A, B, C, _, P = reference.structured_model(rng, inside, outside_inverse)
+    M, R = A @ P + B, rng.normal(size=(n, n))
+    expected = np.linalg.solve(reference.sylvester_matrix(M, A, P), R.ravel()).reshape(n, n)
+    X = solve_sylvester(*map(jnp.asarray, (M, A, P, R)))
+    # Rounding errors are magnified by the condition of the dense system (for the reference) and by the series' amplification
+    # (for doubling), so the two may differ by a small multiple of machine precision times the larger of the two.
+    magnifier = max(np.linalg.cond(reference.sylvester_matrix(M, A, P)), reference.series_amplification(M, A, P))
+    np.testing.assert_allclose(X, expected, rtol=0, atol=10 * np.finfo(float).eps * magnifier * np.max(np.abs(expected)))
+    norm = lambda Y: np.linalg.norm(Y, np.inf)
+    scale = norm(M) * norm(X) + norm(A) * norm(X) * norm(P) + norm(R)
+    assert norm(M @ X + A @ X @ P - R) < 1e-14 * scale  # the residual, relative to the sizes involved: a backward error
 
 
 # Derivatives -----------------------------------------------------------------------------------------------------------------

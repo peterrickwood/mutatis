@@ -17,7 +17,8 @@ conditions. `solve_forward_looking` counts the roots (`roots`) to check those co
 fast iterative method built from matrix products and linear solves (Bini, Latouche and Meini; also used by Dynare).
 
 Derivatives with respect to A, B and C come from differentiating the equation P satisfies (the implicit function theorem), not
-from differentiating the iterations.
+from differentiating the iterations. That gives a linear matrix equation for the derivative (`solve_sylvester`), solved by
+doubling with n x n products only.
 
 Roots within `UNIT_ROOT_MARGIN` of the unit circle count as not exploding, so models with a random walk can be solved.
 """
@@ -149,19 +150,48 @@ def _solve_quadratic_jvp(tolerance, max_iterations, primals, tangents):
     P, status = _solve_quadratic(A, B, C, tolerance, max_iterations)
     ok = status == Status.OK
     n = P.shape[0]
-    K = jnp.where(ok, sylvester_matrix(A @ P + B, A, P), jnp.eye(n * n))
-    right = jnp.where(ok, -(dA @ P @ P + dB @ P + dC), 0.0).ravel()
-    solve = lambda _, b: jnp.linalg.solve(K, b)
-    solve_transposed = lambda _, b: jnp.linalg.solve(K.T, b)
-    dP = jax.lax.custom_linear_solve(lambda v: K @ v, right, solve, solve_transposed).reshape(n, n)
+    # Where the solve failed, P is zero and the tangent must be zero, never NaN: the equation becomes X = 0.
+    M, A = jnp.where(ok, A @ P + B, jnp.eye(n)), jnp.where(ok, A, 0.0)
+    lu = jax.scipy.linalg.lu_factor(M)
+    right = jnp.where(ok, -(dA @ P @ P + dB @ P + dC), 0.0)
+    dP = jax.lax.custom_linear_solve(lambda X: M @ X + A @ X @ P, right,
+                                     lambda _, R: _sylvester_by_doubling(lu, A, P, R, transposed=False),
+                                     lambda _, R: _sylvester_by_doubling(lu, A, P, R, transposed=True))
     return (P, status), (dP, jnp.zeros_like(status))
 
 
-def sylvester_matrix(M: Float[Array, "n n"], A: Float[Array, "n n"], P: Float[Array, "n n"]) -> Float[Array, "nn nn"]:
-    """The matrix of the linear map X -> M X + A X P, acting on X flattened row by row.
+def solve_sylvester(M: Float[Array, "n n"], A: Float[Array, "n n"], P: Float[Array, "n n"], R: Float[Array, "n n"]) -> Float[Array, "n n"]:
+    """The X with M X + A X P = R, when M is invertible and every eigenvalue of M^-1 A times every eigenvalue of P is less than
+    one in size. That holds for the equation the derivative of a non-exploding solution satisfies (M = A P + B): the eigenvalues
+    of M^-1 A are minus the inverses of the n exploding roots, and those of P are the n others, so the condition is the gap
+    between the two groups of roots that the solution needs anyway.
 
-    Built densely, so its size grows with n^4. Adequate for models with up to a few dozen variables; larger models need a solver
-    that never forms this matrix.
+    Rewritten as X = G + F X P with G = M^-1 R and F = -M^-1 A, the answer is the sum of F^j G P^j over j = 0, 1, 2, ...
+    Doubling sums it in blocks that double in length, squaring F and P at each step, so k steps cover 2^k terms using only
+    products of n x n matrices: the cost grows with n^3 per step, where forming the equation as one n^2 x n^2 system grows
+    with n^6. The number of steps grows with the log of 1 / (1 - gap ratio): about 18 when the roots are 1e-4 apart around 1.
     """
-    n = M.shape[0]
-    return jnp.kron(M, jnp.eye(n)) + jnp.kron(A, P.T)
+    return _sylvester_by_doubling(jax.scipy.linalg.lu_factor(M), A, P, R, transposed=False)
+
+
+def _sylvester_by_doubling(lu, A, P, R, transposed: bool, max_doublings: int = 64):
+    # transposed: solve M' X + A' X P' = R, the transposed equation that reverse-mode derivatives need.
+    trans = 1 if transposed else 0
+    F = -jax.scipy.linalg.lu_solve(lu, A.T if transposed else A, trans=trans)
+    X = jax.scipy.linalg.lu_solve(lu, R, trans=trans)
+    P = P.T if transposed else P
+    eps = jnp.finfo(X.dtype).eps
+
+    def step(carry):
+        X, F, P, _, k = carry
+        increment = F @ X @ P  # the next block of terms: sum over j from 2^k to 2^(k+1) - 1 of F^j G P^j
+        X = X + increment
+        change = _norm(increment) / jnp.maximum(_norm(X), jnp.finfo(X.dtype).tiny)
+        return X, F @ F, P @ P, change, k + 1
+
+    def keep_going(carry):
+        *_, change, k = carry
+        return (change > eps) & (k < max_doublings)
+
+    X, *_ = jax.lax.while_loop(keep_going, step, (X, F, P, jnp.array(jnp.inf, X.dtype), jnp.array(0)))
+    return X

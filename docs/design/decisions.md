@@ -163,3 +163,30 @@ cannot be the standard. The comparison with them is still printed for every run,
 sqrt(N) for the ends of 68% intervals) understated the noise about threefold: across five seeds, our own interval ends for
 Restriction (3) moved with sd 0.025, 0.022 and 0.016 where the formula said 0.0078, 0.0078 and 0.0059. Draws of every reported
 quantity are now stored with each result (`quantities.npz`) for this.
+
+## Numerical audit (2026-11-26)
+
+**34. The derivative of the forward-looking solve solves its matrix equation by doubling, not by forming an n² × n² matrix.**
+Differentiating A P² + B P + C = 0 gives (A P + B) dP + A dP P = R. It was solved by building the n² × n² matrix of that map
+and factoring it, whose cost grows with n⁶ and memory with n⁴ (328 MB for one model of 80 variables). It is now rewritten as
+dP = G + F dP P and summed by doubling (`numerics.linear_re.solve_sylvester`), using only n × n products; the sum converges
+exactly when the solution's roots have a gap at the unit circle, which the solve needs anyway, and takes about as many steps
+as cyclic reduction (8 for well-separated roots, 24 for roots 1e-6 apart around 1). Evidence
+(`experiments/forward_looking_solve_cost.py`): one solve with its gradient took 1,320 ms at 80 variables and 69 ms at 40
+before, 58 ms and 14 ms after, so the gradient now adds 6% or less to the solve; 1,000 solves with gradients at 20 variables
+took 4.6 s before and 1.5 s after; at 80 they now take 65 s, and before they did not fit in memory. Against the dense form,
+the answers differ by at most 0.6 machine epsilon times the larger of the dense system's condition number and the series'
+error amplification, on 12 cases from 1 to 20 variables with root gaps down to 1e-4. The alternative was Bartels–Stewart
+through Schur decompositions, also n³, but JAX's Schur decomposition runs only on the CPU and in a sequential loop over a batch.
+The dense form stays only as a test reference (`tests/numerics/reference.py`).
+
+**35. The forward-looking solve is checked against SciPy's ordered QZ (Klein's method) at up to 80 variables; where the two
+largest-and-smallest roots are 1e-4 apart around the unit circle, only the residual is required.** Medium-tier test
+`test_agrees_with_ordered_qz`: complex roots, static equations and unlagged variables, unit roots, root gaps of 1e-2 to 1e-4,
+and both kinds of failure, at 10, 40 and 80 variables. In a wider scratch run (144 cases, 2 to 80 variables), the
+classification agreed every time and P agreed with QZ to 1e-8 relative except at gaps of 1e-4, where it differed by up to
+3.6e-8. That difference is the problem's, not either method's: computing the exact answer for those systems (Newton's method
+with residuals in 40-place arithmetic) put this solve 1e-9 to 7e-9 and QZ 1e-9 to 3e-8 away from it, with the derivative's
+equation having condition numbers of 1e10 to 1e13. Elsewhere this solve is less accurate than QZ at 40 to 80 variables: 1e-10
+to 1e-9 away from the exact answer where QZ was 4e-12 to 9e-11, with residuals about 50 times larger. That is far below what
+estimation can notice, and one Newton step did not reliably improve it, so it is recorded rather than fixed.
