@@ -1,0 +1,27 @@
+# The price depends on what people expect it to be next quarter. With rational expectations, p = x / (1 - a * rho).
+model: forward-looking
+time: quarterly
+expectations: rational
+
+blocks:
+  demand:
+    outputs: [x]
+    parameters:
+      rho:     {prior: "beta(mean=0.8, sd=0.1)"}
+      sigma_x: {prior: "half_normal(scale=1)"}
+    shocks:
+      e: "normal(0, sigma_x)"
+    equations:
+      - "x = rho * x(-1) + e"
+
+  price:
+    inputs: [x]
+    outputs: [p]
+    parameters:
+      a: {prior: "beta(mean=0.5, sd=0.1)"}
+    equations:
+      - "p = x + a * E(p(+1))"
+
+data:
+  x_obs: {observes: x, error: "normal(0, 0.1)"}
+  p_obs: {observes: p, error: "normal(0, 0.1)"}

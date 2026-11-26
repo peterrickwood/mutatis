@@ -1,0 +1,22 @@
+# One variable that drifts, seen through noisy data.
+model: hidden-level
+time: quarterly
+
+blocks:
+  level:
+    outputs: [mu]
+    parameters:
+      sigma_eta: {prior: "half_normal(scale=1)"}
+    shocks:
+      eta: "normal(0, sigma_eta)"
+    initial:
+      mu: "normal(0, 10)"
+    equations:
+      - "mu = mu(-1) + eta"
+
+data:
+  y:
+    observes: mu
+    error: "normal(0, sigma_eps)"
+    parameters:
+      sigma_eps: {prior: "half_normal(scale=1)"}

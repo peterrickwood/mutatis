@@ -1,0 +1,45 @@
+# A small multi-sector model written with templates: capital and investment are written once, for each sector in the list.
+model: sectors
+time: quarterly
+sets:
+  sectors: [n, m]
+
+blocks:
+  "capital[j in sectors]":
+    inputs: ["invest[j]"]
+    outputs: ["k[j]"]
+    parameters:
+      delta: {prior: "beta(mean=0.1, sd=0.02)"}
+    equations:
+      - "k[j] = (1 - delta) * k[j](-1) + invest[j]"
+
+  "investment[j in sectors]":
+    inputs: [r]
+    outputs: ["invest[j]"]
+    parameters:
+      phi: {prior: "normal(1, 0.5)"}
+      sigma_u: {prior: "half_normal(scale=1)"}
+    shocks:
+      "u[sectors]": "normal(0, sigma_u)"
+    equations:
+      - "invest[j] = -phi * r + u[j]"
+
+  rate:
+    outputs: [r]
+    parameters:
+      rho: {prior: "beta(mean=0.5, sd=0.1)"}
+      sigma_e: {prior: "half_normal(scale=1)"}
+    shocks:
+      e: "normal(0, sigma_e)"
+    equations:
+      - "r = rho * r(-1) + e"
+
+  total:
+    inputs: ["k[sectors]"]
+    outputs: [K]
+    equations:
+      - "K = sum(j in sectors: k[j])"
+
+data:
+  total_capital: {observes: K, error: "normal(0, 0.1)"}
+  rate: {observes: r, error: "normal(0, 0.1)"}

@@ -1,0 +1,22 @@
+# Spending moves back towards a long-run relation with income. Income comes from data.
+model: error-correction
+time: quarterly
+
+blocks:
+  spending:
+    inputs: [income]
+    outputs: [spend]
+    parameters:
+      alpha0: {prior: "normal(0, 1)"}
+      gamma:  {prior: "normal(0, 1)"}
+      beta1:  {prior: "normal(1, 0.5)"}
+      alpha1: {prior: "normal(0, 1)"}
+      sigma:  {prior: "half_normal(scale=1)"}
+    shocks:
+      e: "normal(0, sigma)"
+    equations:
+      - "d(spend) = alpha0 + gamma * (spend(-1) - beta1 * income(-1)) + alpha1 * d(income) + e"
+
+data:
+  spend:  {observes: spend}
+  income: {feeds: income}

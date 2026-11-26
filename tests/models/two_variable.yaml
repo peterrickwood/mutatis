@@ -1,0 +1,21 @@
+# A two-variable VAR with one lag. Both series are observed exactly, so the shocks are read off the data.
+model: two-variable
+time: quarterly
+sets:
+  series: [a, b]
+
+blocks:
+  dynamics:
+    outputs: ["y[series]"]
+    parameters:
+      c:     {shape: [series], prior: "normal(0, 10)"}
+      B:     {shape: [series, series], prior: "normal(0, 1)"}
+      Sigma: {shape: [series, series], domain: positive_definite, prior: "inverse_wishart(df=4, scale=identity)"}
+    shocks:
+      "u[series]": "multivariate_normal(0, Sigma)"
+    equations:
+      - "y = c + B @ y(-1) + u"
+
+data:
+  a: {observes: "y[a]"}
+  b: {observes: "y[b]"}
