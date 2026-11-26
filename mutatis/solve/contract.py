@@ -35,7 +35,7 @@ class LinearForm(NamedTuple):
 
 class GaussianNoise(NamedTuple):
     shock_cov: Float[Array, "k k"]
-    error_var: Float[Array, " o"]   # zero for series observed exactly
+    error_variance: Float[Array, " o"]   # zero for series observed exactly
 
 
 class SolvedModel(eqx.Module):

@@ -97,8 +97,8 @@ class LinearSolved(SolvedModel):
         if not self.all_gaussian:
             return None
         cov = shock_covariance(self.shock_dists, self.shock_positions, self.shock_shapes)
-        error_var = jnp.array([0.0 if dist is None else dist.scale ** 2 for dist in self.error_dists]) if self.error_dists else jnp.zeros(0)
-        return GaussianNoise(cov, error_var)
+        error_variance = jnp.array([0.0 if dist is None else dist.scale ** 2 for dist in self.error_dists]) if self.error_dists else jnp.zeros(0)
+        return GaussianNoise(cov, error_variance)
 
 
 def shock_covariance(shock_dists, positions, shapes):

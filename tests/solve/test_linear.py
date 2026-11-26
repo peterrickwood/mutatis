@@ -27,7 +27,7 @@ def test_forward_looking_toy():
     np.testing.assert_allclose(solved.Z, np.eye(2))
     noise = solved.gaussian_noise()
     np.testing.assert_allclose(noise.shock_cov, [[0.49]])
-    np.testing.assert_allclose(noise.error_var, [0.01, 0.01])
+    np.testing.assert_allclose(noise.error_variance, [0.01, 0.01])
     mean, cov = solved.initial_gaussian()  # the long-run distribution
     np.testing.assert_allclose(cov, scipy.linalg.solve_discrete_lyapunov(np.asarray(solved.P), np.asarray(solved.Q @ noise.shock_cov @ solved.Q.T)), rtol=1e-9)
     np.testing.assert_allclose(mean, 0, atol=1e-14)
