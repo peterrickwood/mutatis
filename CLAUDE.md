@@ -17,4 +17,9 @@ From *mutatis mutandis*, "the necessary changes having been made": change one as
 
 ## Status
 
-Nothing is designed yet. The repo holds an empty README.md and the LICENSE. Implementation language, how a model is represented, estimation methods and the user interface are all undecided — ask rather than assume.
+Design stage: nothing is implemented yet. The design lives in two documents — read them before proposing or building anything:
+
+- [README.md](README.md) — what mutatis is: the concepts and the framework choices. No planning or staging goes in it.
+- [PLAN.md](PLAN.md) — the implementation plan and staging. Currently a stub.
+
+Anything those documents mark as *proposed* or list as an open question is undecided — ask rather than assume.
