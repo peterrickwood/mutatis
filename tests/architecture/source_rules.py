@@ -15,7 +15,7 @@ DEMOS = REPO / "demos"
 
 # Layers in dependency order: a layer may import only layers earlier in this list (and itself).
 LAYER_ORDER = ["spec", "numerics", "dist", "compile", "solve", "measure", "quantities", "infer", "versions"]
-TOP_LAYERS = {"library", "io"}  # may import any layer; nothing imports them
+TOP_LAYERS = {"library", "io", "__main__"}  # may import any layer; nothing imports them
 CONFIG = "_jax_config"          # JAX settings, importable by any layer that uses JAX
 SELF_CONTAINED = {"numerics", "dist"}  # import nothing else of ours except CONFIG
 SOLVE_CONTRACT = "mutatis.solve.contract"  # the only part of solve that infer may see
@@ -96,6 +96,8 @@ def import_violations(module: str, source: str, is_package: bool) -> list[Violat
             found.append(Violation(module, f"infer may see solve only through {SOLVE_CONTRACT}, but imports {target}"))
         elif here in TOP_LAYERS:
             continue
+        elif here not in LAYER_ORDER:
+            found.append(Violation(module, f"{here!r} is not a known layer; add it to LAYER_ORDER or TOP_LAYERS in the architecture rules"))
         elif there == "" or there not in LAYER_ORDER or LAYER_ORDER.index(there) > LAYER_ORDER.index(here):
             found.append(Violation(module, f"{here} may not import the later layer {there or 'mutatis'} ({target})"))
     return found

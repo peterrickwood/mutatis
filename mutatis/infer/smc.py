@@ -27,7 +27,7 @@ class SMCError(RuntimeError):
     pass
 
 
-def smc(problem, key, n_particles: int = 2000, n_mcmc_steps: int = 10, n_leapfrog: int = 10, target_ess: float = 0.5,
+def smc(problem, key, n_particles: int = 2000, n_mcmc_steps: int = 5, n_leapfrog: int = 5, target_ess: float = 0.5,
         target_acceptance: float = 0.65, initial_step_size: float = 0.5, max_steps: int = 1000) -> Posterior:
     """Sample a posterior problem (contract 2: `draw_prior`, `log_prior`, `log_likelihood`)."""
     key_prior, key_steps = jax.random.split(key)

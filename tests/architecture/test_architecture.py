@@ -36,6 +36,7 @@ def test_demonstrations_contain_no_code():
         ("mutatis.compile", "from mutatis.library import household", True, "nothing may import library"),
         ("mutatis.versions.store", "import mutatis.io.dynare", False, "nothing may import io"),
         ("mutatis", "from mutatis import numerics", True, "top-level package must not import layers"),
+        ("mutatis.extra.thing", "from mutatis.spec import model", False, "not a known layer"),
     ],
 )
 def test_import_checker_catches(module, source, is_pkg, expected):

@@ -93,3 +93,12 @@ because it draws from it.
 shocks read off the data; one-step-ahead errors exactly linear in the flat-prior coefficients (compared at a second random
 point); every coefficient used by exactly one series' error; every series using the same regressors; the errors' covariance equal
 to the one covariance parameter. This keeps the formula free of any notion of "VAR" while covering VARs and SVARs.
+
+**22. A stored result is keyed by the specification after edits, a fingerprint of the data, every sampler setting including the
+defaults in force, and the seed.** Running the same thing again returns the stored result. Including the defaults matters: a
+cached result must not be reused after a default changes, which happened once during development (the number of SMC moves).
+
+**23. SMC defaults: 5 Hamiltonian moves of 5 leapfrog steps per temperature step.** Down from 10 and 10, which took 5 minutes on
+the three-parameter forward-looking toy (150 periods, 1,000 particles); now 1.5 minutes, with the same posterior and the sampler
+tests on known answers still passing. Most of the remaining time is the Kalman filter's gradient (0.35 s per gradient over 1,000
+particles), so speed is a known issue for later stages.
