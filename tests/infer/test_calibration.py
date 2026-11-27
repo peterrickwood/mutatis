@@ -16,7 +16,7 @@ deterministic.
 
 Tiers: SMC and NUTS are medium (about 2 minutes together); the exact regression formula is slow (about 11 minutes, because it
 builds and compiles a new problem for each of its 150 data sets), and so is the general sampler at its default settings (a
-tempering ladder for each of 100 data sets).
+peak search and a run to convergence for each of 100 data sets). Samplers run to their convergence tests, not to a fixed length.
 """
 
 import jax
@@ -80,7 +80,7 @@ def test_nuts_is_calibrated():
     rng, positions = np.random.default_rng(1), []
     for replication in range(100):
         truth, y = _simulate(rng)
-        posterior = nuts(MeanAndScale(y), jax.random.key(replication), n_chains=1, n_warmup=300, n_draws=400)
+        posterior = nuts(MeanAndScale(y), jax.random.key(replication), n_chains=2, processes=1)
         positions.append([np.mean(posterior.particles[:, j] < truth[j]) for j in range(2)])
     _uniform(positions, "NUTS")
 
@@ -90,9 +90,9 @@ def test_default_mcmc_is_calibrated():
     rng, positions = np.random.default_rng(2), []
     for replication in range(100):
         truth, y = _simulate(rng)
-        posterior = mcmc(MeanAndScale(y), jax.random.key(replication), n_warmup=300, n_draws=400)
+        posterior = mcmc(MeanAndScale(y), jax.random.key(replication), processes=1)
         positions.append([np.mean(posterior.particles[:, j] < truth[j]) for j in range(2)])
-    _uniform(positions, "Default MCMC (tempering ladder)")
+    _uniform(positions, "Default MCMC (data-driven settings)")
 
 
 @pytest.mark.slow

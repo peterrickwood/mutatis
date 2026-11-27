@@ -1,8 +1,17 @@
 """The samplers compared, each a named setting of mutatis's own samplers, and how each one's evidence is computed.
 
-The default and its variants are settings of `mutatis.infer.mcmc.mcmc`; "nuts" is its one-rung setting; "smc" is
-`mutatis.infer.smc.smc` with its defaults. Evidence: stepping stones and bridge sampling for runs with a ladder, bridge
-sampling for one-rung runs, and SMC's own estimate for SMC.
+- "default": `mutatis.infer.mcmc.mcmc` at its defaults, which choose from the data and the hardware (decisions 42 and 43): a
+  peak search by optimisation, always a tempering ladder from the prior, a full mass matrix up to 200 unknowns, replicas from
+  the CPUs available, and sampling until the convergence tests are met.
+- "ladder": always a tempering ladder from the prior, Pathfinder starts and no peak search (the default of decision 41), with
+  the same convergence-based stopping.
+- "adaptive" (a variant, no longer main): the try-out of decision 42, a ladder only if the data call for one.
+- "nuts": one rung, 4 chains from prior draws, the same stopping.
+- "smc": `mutatis.infer.smc.smc` at its defaults (a fixed amount of work; it has no convergence test of its own).
+
+Every MCMC method stops on its convergence tests or at the suite's time limit, never after a fixed number of draws.
+Evidence: stepping stones and bridge sampling for runs with a ladder, bridge sampling for one-rung runs, SMC's own estimate
+for SMC.
 """
 
 from dataclasses import dataclass, field
@@ -17,23 +26,29 @@ class Method:
 
 
 METHODS = {m.name: m for m in [
-    Method("default", "Default: NUTS steps, tempering ladder, 4 replicas, Pathfinder starts", "mcmc"),
-    Method("nuts", "NUTS: one rung, 4 chains started from prior draws", "mcmc", {"rungs": 1, "starts": "prior"}),
+    Method("default", "Default: peak search, then always a ladder from the prior, run to convergence", "mcmc"),
+    Method("ladder", "Ladder always, no peak search (decision 41's default): Pathfinder starts, run to convergence", "mcmc",
+           {"rungs": "auto", "starts": "pathfinder"}),
+    Method("nuts", "NUTS: one rung, 4 chains from prior draws, run to convergence", "mcmc", {"rungs": 1, "starts": "prior", "replicas": 4}),
     Method("smc", "SMC: tempered, 2,000 particles, 5 HMC moves of 5 steps", "smc"),
-    Method("prior_starts", "Default with prior-draw starts", "mcmc", {"starts": "prior"}),
-    Method("fitted_reference", "Default with a fitted normal at the ladder's hot end", "mcmc", {"reference": "fitted"}),
-    Method("hmc", "Default with HMC steps (random length) instead of NUTS", "mcmc", {"step": "hmc"}),
-    Method("random_walk", "Default with random-walk steps instead of NUTS", "mcmc", {"step": "random_walk"}),
+    Method("adaptive", "Adaptive (decision 42's try-out): peak search, a ladder only if needed, run to convergence", "mcmc", {"rungs": "decide"}),
+    Method("adaptive_prior_starts", "Adaptive with prior-draw starts (no peak search; the ladder only by escalation)", "mcmc",
+           {"rungs": "decide", "starts": "prior"}),
+    Method("adaptive_hmc", "Adaptive with HMC steps (random length) instead of NUTS", "mcmc", {"rungs": "decide", "step": "hmc"}),
+    Method("adaptive_random_walk", "Adaptive with random-walk steps instead of NUTS", "mcmc", {"rungs": "decide", "step": "random_walk"}),
+    Method("ladder_fitted_reference", "Default, but the ladder from a normal fitted by Pathfinder instead of the prior", "mcmc",
+           {"reference": "fitted"}),
 ]}
-MAIN = ("default", "nuts", "smc")
+MAIN = ("default", "ladder", "nuts", "smc")
 
 
-def run(method: Method, problem, key):
+def run(method: Method, problem, key, max_seconds: float):
+    """One run. MCMC methods stop at their convergence tests or after `max_seconds` (then flagged as not converged)."""
     if method.kind == "smc":
         from mutatis.infer.smc import smc
         return smc(problem, key, **method.options)
     from mutatis.infer.mcmc import mcmc
-    return mcmc(problem, key, **method.options)
+    return mcmc(problem, key, max_seconds=max_seconds, **method.options)
 
 
 def evidence_estimates(method: Method, problem, posterior, key) -> dict:

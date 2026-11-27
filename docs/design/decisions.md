@@ -301,3 +301,126 @@ named setting `nuts` (one rung, prior starts), replacing the separate NUTS modul
 (`mutatis.infer.evidence`, decision 40). SMC is kept, for comparison. Not yet changed: `estimate()`'s automatic choice
 (exact regression, NUTS for sampled shocks, otherwise SMC), pending the benchmark. Alternatives: SMC with better moves; NUTS
 alone, which cannot weigh separated peaks.
+
+**42. The sampler's default settings are chosen from the problem and the hardware, and it never stops on a draw count (a
+try-out, 2026-11-27, pending review of the short benchmark suite).** Asked for in discussion: as many choices as possible from
+the data; stopping only by convergence tests, with a time limit that, when reached, returns the results loudly marked as
+suspect; the hardware used to the full. In `mutatis.infer.mcmc.mcmc`, by default:
+- *What counts as a peak* (revised 2026-11-27 after the first short suite): a climb from a prior draw (L-BFGS, then Newton
+  steps) whose end point is certified: minus the Hessian is positive definite there, so the density falls in every direction,
+  and half the Newton decrement, the further rise the curvature predicts, is below 1e-8. End points that cannot be certified
+  are left out. The first try-out counted every optimiser end point, and reported false peaks: 2 or 3 on the strong banana and
+  6 on the 21-unknown regression, from optimisations that had stopped partway (5 of the 6 had log densities of -843 to -1,023
+  against -393.7 at the true peak). With the certificate: 1 peak on the bananas, the funnel and the regression, 2 on
+  two_peaks_d1 (tests/infer/test_mcmc.py). On the sampled-shocks model (hidden_level_shocks_T50) no climb is certified (0 of
+  1,024): climbs stall where the observation noise is tiny (sd 0.004 to 0.009) at log densities of 127 to 160, a different
+  value for each start, against about -5,000 at prior draws. That fits a density that rises without bound as the noise goes
+  to zero with the hidden path matching the data (likely, not proven); no peak is reported rather than a false one. The certificate needs the full Hessian, so there is no search above 200 unknowns (the same limit
+  as the full mass matrix); a matrix-free certificate (Newton steps by conjugate gradients) would lift that, not built.
+- *Telling peaks apart*: two certified peaks are separate if the log posterior density dips more than 2 below the lower of
+  the two somewhere on the straight line between them (or is not finite there). 2 log units is a factor of about 7 in
+  density: small enough to separate peaks that matter, large enough that the ripples of one peak do not count. Because only
+  certified peaks are compared, a single curved peak (one highest point) cannot count as several, though the straight line
+  between two of its other points can dip.
+- *How much to search*: climbs in rounds spread over the processes, until there have been enough starts to find, with 95%
+  probability, any peak reached from at least 1 in 10,000 prior draws (N = ln 20 / 10^-4, about 30,000) and the last round
+  found no new peak; or until 10% of `max_seconds` has gone (time for compiling the climb included). The reason for sizing
+  it from a detection limit rather than a fixed count: the number of starts then says what the search can promise. With N
+  starts, a peak whose catchment (the prior draws from which a climb reaches it) holds a share p of the prior is missed by
+  every start with probability (1 - p)^N, at most exp(-p N); so a peak with p of at least ln 20 / N is found with 95%
+  probability. Every result states it: "searched N starts: a peak reached from fewer than 1 in M prior draws could have been
+  missed" (M = N / ln 20), or that there was no search. The narrow peak of two_peaks_d5 holds 1 in 8,800 prior draws, so
+  30,000 starts find it with about 97% probability; in 20 dimensions it holds 1 in 9 x 10^13, beyond any search from prior
+  draws, and the statement says so. Cost, measured: 30,000 climbs took 10 s on two_peaks_d1 in one process (climb
+  compiled once, 2.6 s), 8 s in 8; about 0.2 to 0.6 ms a climb on the cheap targets, 30 ms on the 21-unknown regression, and
+  0.4 s on the forward-looking model (whose climb takes 28 s to compile), where the 10% cap, not the count, ends the search.
+- *Ladder or not* (replaced as the default by decision 43; kept as `rungs="decide"`): plain chains if the search found one peak or none; the ladder (as decision 41) if it found several, with the
+  replicas started round robin over the peaks. During warm-up without a ladder, the ladder is switched on (and warm-up
+  restarts from the chains' positions) if the chains' window means lie in separate peaks by the same valley test, or if
+  after 1,000 scans of slow windows they still disagree (R-hat over the window above 1.05). Only during warm-up, so that no
+  kept draw comes from a sampler that was still changing. Rung count and spacing: as decision 41.
+- *Mass matrix*: full (correlations included) up to 200 unknowns, one scale per unknown above that; Stan's regularisation.
+- *Warm-up length*: Stan's windows, open-ended: first 75 scans, slow windows from 25 doubling up to 3,200, last 50; warm-up
+  ends after a slow window (at least two) in which the chains agree (R-hat over the window below 1.05) and the automatic rung
+  count has settled (changed by no more than 1 rung or 10%). Without the cap, chains that never agree (NUTS in two peaks)
+  had planned windows of 13 million scans.
+- *Chains without a ladder seen in separate peaks*: after a slow window in which the chains disagree (R-hat over the window
+  at least 1.05) and the valley test puts their window means in separate peaks, the sampler climbs from each chain's position
+  and counts the certified peaks reached. Testing the window means directly, as first tried, switched the ladder on for the
+  mild banana (one curved peak) in both seeds. With `rungs="decide"` two or more peaks switch the ladder on; where no ladder
+  is allowed (`nuts`, `rungs=1`) the run is reported as not converged, because such chains cannot weigh peaks, and chains
+  that later all fall into one peak would pass every other test (seen in the benchmark: NUTS on two peaks in one dimension
+  did exactly that once windows were capped).
+- *Memory*: at most 10,000 draws are kept per chain; past that the kept draws are thinned to every second one, and every
+  second scan is kept from then on (doubling again as needed). The tests are judged on the kept draws, which can only make
+  them stricter; divergences and swap acceptance are counted over every scan. Without this, cheap targets that do not
+  converge kept millions of draws per chain within 600 s (3.6 to 4.1 GB per run, and later steps on them took longer than
+  the run).
+- *Run length*: blocks of at least 100 scans, each at least half of all before it, until every unknown has R-hat below 1.01,
+  bulk effective sample size at least (1 / precision)^2 = 1,600 at the default precision 0.025 (Monte Carlo error of every
+  posterior mean at most 2.5% of its posterior sd, chosen by Peter so that the benchmark's accuracy threshold of 0.1 sd is
+  four Monte Carlo errors), tail effective sample size at least 400, and with a ladder at least 2 round trips per replica,
+  counted from the ladder's last respacing (not reset at the start of sampling; see parked item 2 on why the old count ran
+  short). `max_seconds` (default 3,600, the whole run): when reached, the draws so far are returned with `converged` False, a
+  `status` naming the unmet tests, and a `NotConvergedWarning` starting "NOT CONVERGED — RESULTS ARE SUSPECT"; the versions
+  summary records the status and the command line prints it in a banner.
+- *Chains and cores*: one replica per usable CPU (at least 4, at most 64), each group of replicas in its own process pinned
+  to its own CPU (`mutatis.numerics.parallel`); 4 in this process when there is one CPU; 64 in this process on a GPU or TPU (a
+  rule of thumb, not measured). Measured on 8 CPUs (4 cores with 2 threads each): in one process, vmapped chains do not
+  spread over the cores (time per chain-step flat from 1 to 64 chains, CPU over wall time 1.0); splitting them over XLA host
+  devices in one process was slower than one device for a Kalman-filter likelihood (4 chains on 4 devices 1.0 s, against
+  0.17 s for one chain alone), because its small linear-algebra calls contend between threads (a loop of 2 x 2 Cholesky
+  solves: 4 devices from one thread 4 times as long as one, from 4 threads 6 times); separate pinned processes ran at full
+  speed (one chain 0.17 s alone; 7 or 8 at once 0.23 to 0.42 s each).
+  Programs are compiled once, in the main process, and sent compiled (`jax.experimental.serialize_executable`); the search's
+  climbs and the Pathfinder runs go through the same processes. The first try-out sent each worker a `jax.export`ed program
+  to compile itself, and a whole run with 6 workers was no faster than with one process. Measured cause, on the forward-
+  looking model: export 4.9 s, then compiling took 17 s in one pinned worker and 29 s in each of 6 compiling at once, against
+  12 s in the unpinned main process. Not the warm-up windows: chunks always have 25 scans, so a run with one rung needs one
+  program. Loading the compiled program takes a worker 0.5 to 0.8 s, and it gives bit-identical results. Two things the
+  workers need: LAPACK loaded before the first call (JAX loads it when it compiles a linear-algebra call; a worker that only
+  loads compiled programs crashed without it), and programs compiled with JAX's persistent compilation cache bypassed (a
+  program loaded from the cache is sent incompletely, and fails in the worker with "Function ... not found"). So with
+  workers there is no reuse of compiled programs between runs; in one process the cache is used as configured.
+  Whole runs (max_seconds 600, as in the benchmark), one process (4 chains) against 8 (8 chains):
+  normal_means_d10 69 s against 28 s (search 58 s for 30,200 starts against 18 s for 32,704);
+  hidden_level_shocks_T50 92 s against 57 s (search stopped by its 60 s cap after 15,824 starts, against 32 s for 32,704);
+  forward_looking 195 s against 142 s (search capped at 60 s either way: 64 starts against 192; sampling 67 s against 35 s
+  for more draws, about 2.5 times the throughput; warm-up 44 s against 26 s). The rest is serial: compiling the climb (28 s
+  on the forward-looking model), Pathfinder (13 s) and chunk (12 s) programs in the main process, one after another; and
+  sampling speeds up by about 2.5, not 8, because 8 CPUs are 4 cores with 2 threads each and each chunk waits for the
+  slowest worker. Not yet tried: compiling the programs side by side while the search runs.
+- The stopping rule is a parameter of the one sampling loop: a fixed-length rule exists only for the unit tests of the
+  ladder's machinery, which compare against formulas for fixed lengths.
+- *The convergence diagnostics* (R-hat, bulk and tail effective sample sizes) are computed in NumPy
+  (`mutatis.infer.convergence`), a port of BlackJAX's that matches it to 1e-9 on independent, autocorrelated, tied, stuck
+  and constant draws (tested). BlackJAX's JAX versions compiled afresh for every new number of draws, about 11 s a call
+  (7 s under `jax.jit`), which made the checks after each block cost more than the sampling on cheap targets; NumPy takes
+  milliseconds.
+Named settings: `nuts(problem, key)` (one rung, prior starts, 4 replicas) and the previous default as `mcmc(rungs="auto",
+starts="pathfinder")`, both with the same stopping. `estimate()`'s automatic choice is still unchanged (parked item 2).
+Alternatives: a fixed draw count (rejected in discussion); one replica count for all hardware; running chains on several XLA
+devices in one process (slower for the Kalman filter, as measured).
+
+**43. The default sampler always uses a ladder, and keeps the peak search (agreed in discussion 2026-11-27, after the short
+benchmark suite).** In `mutatis.infer.mcmc.mcmc`, `rungs="auto"` is now the default; decision 42's rule (a ladder only if
+the search finds several peaks, or warm-up sees the chains in separate peaks) stays available as `rungs="decide"`. Why:
+correctness before speed. In the short suite (`benchmarks/samplers/results/short-3`, 38 runs per method), decision 42's rule
+was confidently wrong on 5 runs: the 20-dimension narrow peak twice (every method was), the 5-dimension narrow peak once
+(both peaks found and a ladder used, but weights 0.25 / 0.75 against 0.3 / 0.7, in a run that stopped as converged after
+1,025 draws per chain), and each banana once. On the bananas the certified search rightly found one peak, so there was no
+ladder, and plain chains passed every convergence test with the spread 13 to 14% too narrow (with 186 to 450,900 divergent
+trajectories, which the tests do not count); in the run before, false peaks had switched the ladder on and all four banana
+runs were right. On the held-out Inference Gym targets (`results/held-out-2`) the same rule was confidently wrong on the
+banana (one seed of two), Brownian motion with unknown scales (both seeds: the observation noise's mean off by 0.26 to 0.32
+sd, the scales' spread about 20% too narrow) and the small stochastic volatility model (both seeds, in the spread of one
+quantity with a Cauchy prior, whose reference spread may itself be off). A ladder always (decision 41's default) was
+confidently wrong in short-3 only on the 20-dimension narrow peak. Cost: a ladder in every run, about 1.75 times decision
+42's total run time in short-3 (2.6 h against 1.5 h); where the prior is much wider than the posterior the ladder needs
+many rungs (barrier 22 on 50 normal means, about 47 rungs), and on two short-suite targets warm-up did not finish in 600 s
+(open: how many rungs, and where the ladder starts; parked item 2). The search is kept: it puts the starts on the peaks found
+and states its detection limit, at a cost of at most 10% of `max_seconds`. When this was decided, the search with a ladder
+always had not been benchmarked together; the short suite is rerun with it, against the same with the ladder from a fitted
+normal (`reference="fitted"`). Alternatives: decision 42's rule with divergent trajectories also switching the ladder on
+(not tried; it would switch it on for the sampled-shocks model too, where the ladder takes about 4 times as long); a ladder
+always without the search (decision 41).

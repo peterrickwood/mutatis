@@ -84,6 +84,11 @@ def main(argv=None) -> int:
     options = {k: v for k, v in {"n_particles": args.particles, "n_draws": args.draws}.items() if v is not None}
     result = runs.run(model, dataset, store=args.store, edits=edits, seed=args.seed, route=args.route, method=args.method, report=report, **options)
     print(f"stored in {result.folder}  ({result.run['method']}, {result.run['route']})")
+    if result.summary.get("converged") is False:
+        banner = "!" * 100
+        print(f"{banner}\nNOT CONVERGED — RESULTS ARE SUSPECT: {result.summary.get('status', '')}\n{banner}", file=sys.stderr)
+    if result.summary.get("peak_search"):
+        print(f"  peak search: {result.summary['peak_search']}")
     shown = [(n, e) for n, e in result.summary["parameters"].items() if "mean" in e]
     for name, entry in shown[:30]:
         print(f"  {name:<28} {entry['mean']:.4f}  ({entry['q05']:.4f} to {entry['q95']:.4f})")

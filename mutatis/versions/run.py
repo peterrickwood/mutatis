@@ -58,7 +58,7 @@ def run_key(model: Model, dataset: Dataset, settings: dict, seed: int) -> str:
 def summarise(problem, posterior: Posterior, key, report=()) -> dict:
     summary = _summarise_parameters(problem, posterior, key)
     summary["quantities"] = _summarise_quantities(problem, posterior, key, report)
-    for name in ("plausibility", "max_rhat", "min_ess", "divergences", "round_trips", "converged", "findings"):
+    for name in ("plausibility", "max_rhat", "min_ess", "divergences", "round_trips", "converged", "status", "findings", "peak_search"):
         if name in posterior.diagnostics:
             summary[name] = posterior.diagnostics[name]
     return summary

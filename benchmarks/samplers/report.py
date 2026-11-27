@@ -1,9 +1,10 @@
 """The benchmark report: one self-contained HTML file, charts drawn as inline SVG, no external resources.
 
-Colours follow the dataviz reference palette: categorical slots 1 to 3 (blue, orange, aqua) for the three main methods, checked
-with the palette validator in light and dark mode (all pairs pass; two light-mode hues are below 3:1 contrast, so every chart
-has direct labels or distinct marker shapes and every number is also in a table). Pass and fail use the status colours, always
-with an icon and a word.
+Colours follow the dataviz reference palette: categorical slots 1 to 3 (blue, orange, aqua) for the three MCMC methods, and a
+neutral grey for SMC, the baseline (no fourth hue passed the all-pairs checks beside these three; the grey passes them, light
+#5a5a5a and dark #c4c4c4, checked with the palette validator). Two light-mode hues are below 3:1 contrast, so every series also
+has its own marker shape and every number is also in a table. Pass and fail use the status colours, always with an icon and a
+word; runs that stopped at their time limit carry a red "DID NOT CONVERGE" badge.
 """
 
 import html
@@ -18,23 +19,22 @@ import numpy as np
 from benchmarks.samplers.methods import MAIN, METHODS
 from benchmarks.samplers.metrics import EVIDENCE_LIMIT, MEAN_ERROR_LIMIT, PEAK_WEIGHT_LIMIT, SD_RATIO_RANGE
 
-SERIES = {"default": 1, "nuts": 2, "smc": 3}
-SHAPES = {"default": "circle", "nuts": "square", "smc": "triangle"}
-EVIDENCE_OF = {"default": "stepping_stones", "nuts": "bridge", "smc": "smc"}   # the estimate charted for each main method
+SERIES = {"default": 1, "ladder": 2, "nuts": 3, "smc": 4}
+SHAPES = {"default": "circle", "ladder": "diamond", "nuts": "square", "smc": "triangle"}
 EVIDENCE_LABEL = {"stepping_stones": "stepping stones", "bridge": "bridge sampling", "smc": "SMC's own"}
 
 CSS = """
 :root { color-scheme: light;
   --page: #f9f9f9; --surface-1: #ffffff; --text-primary: #191919; --text-secondary: #666666; --grid: #e7e7e7; --axis: #c2c2c2;
-  --border: rgba(11,11,11,0.10); --series-1: #257de0; --series-2: #f47230; --series-3: #00b894;
+  --border: rgba(11,11,11,0.10); --series-1: #257de0; --series-2: #f47230; --series-3: #00b894; --series-4: #5a5a5a;
   --good: #0aac23; --warning: #fbb315; --critical: #dc3c3d; --good-text: #006c10; --critical-text: #b3261e; }
 @media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) { color-scheme: dark;
   --page: #0b0b0b; --surface-1: #191919; --text-primary: #efefef; --text-secondary: #9c9c9c; --grid: #303030; --axis: #474747;
-  --border: rgba(255,255,255,0.10); --series-1: #338ced; --series-2: #e76624; --series-3: #00a888; --good-text: #53c556;
+  --border: rgba(255,255,255,0.10); --series-1: #338ced; --series-2: #e76624; --series-3: #00a888; --series-4: #c4c4c4; --good-text: #53c556;
   --critical-text: #eb6263; } }
 :root[data-theme="dark"] { color-scheme: dark;
   --page: #0b0b0b; --surface-1: #191919; --text-primary: #efefef; --text-secondary: #9c9c9c; --grid: #303030; --axis: #474747;
-  --border: rgba(255,255,255,0.10); --series-1: #338ced; --series-2: #e76624; --series-3: #00a888; --good-text: #53c556;
+  --border: rgba(255,255,255,0.10); --series-1: #338ced; --series-2: #e76624; --series-3: #00a888; --series-4: #c4c4c4; --good-text: #53c556;
   --critical-text: #eb6263; }
 body { background: var(--page); color: var(--text-primary); font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   margin: 0; padding: 24px 16px; line-height: 1.45; }
@@ -56,7 +56,8 @@ svg .label { fill: var(--text-primary); font-size: 11px; }
 svg .grid { stroke: var(--grid); stroke-width: 1; } svg .axis { stroke: var(--axis); stroke-width: 1; }
 svg .limit { stroke: var(--critical); stroke-width: 1; opacity: 0.7; }
 .s1 { fill: var(--series-1); stroke: var(--series-1); } .s2 { fill: var(--series-2); stroke: var(--series-2); }
-.s3 { fill: var(--series-3); stroke: var(--series-3); }
+.s3 { fill: var(--series-3); stroke: var(--series-3); } .s4 { fill: var(--series-4); stroke: var(--series-4); }
+.nc { display: inline-block; border-radius: 4px; padding: 0 6px; font-weight: 700; background: var(--critical); color: #ffffff; }
 svg .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 svg .mark { stroke: var(--surface-1); stroke-width: 2; }
 details summary { cursor: pointer; font-weight: 600; margin: 6px 0; }
@@ -83,6 +84,8 @@ def _marker(shape: str, cls: str, x: float, y: float, title: str) -> str:
     t = f"<title>{_e(title)}</title>"
     if shape == "square":
         return f'<rect class="{cls} mark" x="{x - 4.5:.1f}" y="{y - 4.5:.1f}" width="9" height="9" rx="1">{t}</rect>'
+    if shape == "diamond":
+        return f'<path class="{cls} mark" d="M{x:.1f},{y - 6:.1f} L{x + 6:.1f},{y:.1f} L{x:.1f},{y + 6:.1f} L{x - 6:.1f},{y:.1f} Z">{t}</path>'
     if shape == "triangle":
         return f'<path class="{cls} mark" d="M{x:.1f},{y - 5.5:.1f} L{x + 5.5:.1f},{y + 4.5:.1f} L{x - 5.5:.1f},{y + 4.5:.1f} Z">{t}</path>'
     return f'<circle class="{cls} mark" cx="{x:.1f}" cy="{y:.1f}" r="4.5">{t}</circle>'
@@ -93,7 +96,7 @@ def _legend(methods) -> str:
     for m in methods:
         shape = SHAPES[m]
         icon = {"circle": '<circle cx="7" cy="7" r="4.5"', "square": '<rect x="2.5" y="2.5" width="9" height="9" rx="1"',
-                "triangle": '<path d="M7,1.5 L12.5,11.5 L1.5,11.5 Z"'}[shape]
+                "triangle": '<path d="M7,1.5 L12.5,11.5 L1.5,11.5 Z"', "diamond": '<path d="M7,1 L13,7 L7,13 L1,7 Z"'}[shape]
         items.append(f'<span><svg width="14" height="14" aria-hidden="true">{icon} class="s{SERIES[m]}"/></svg>{_e(METHODS[m].label)}</span>')
     return '<div class="legend">' + "".join(items) + "</div>"
 
@@ -202,8 +205,28 @@ def _load(run_dir: Path) -> list[dict]:
 
 
 def _evidence_ok(r: dict, name: str):
+    """True or False; None when the run has no such estimate or the true evidence is not known."""
     e = r.get("evidence", {}).get(name)
-    return None if e is None else bool(e.get("ok"))
+    return None if e is None or e.get("ok") is None else bool(e["ok"])
+
+
+def _one_in(d: dict) -> str:
+    """The peak search's detection limit as "1 in M", or why there is none."""
+    search = d.get("search") or {}
+    if search.get("detection_limit"):
+        return f"1 in {1.0 / search['detection_limit']:,.0f}"
+    return "no search" if not search.get("skipped") else "no search (too many unknowns)"
+
+
+def _evidence_name(r: dict) -> str:
+    """The estimate charted for a run: SMC's own; stepping stones when the run had a ladder; bridge sampling otherwise."""
+    if r["method"] == "smc":
+        return "smc"
+    return "stepping_stones" if (r.get("evidence", {}).get("stepping_stones") or {}).get("log_value") is not None else "bridge"
+
+
+PHASES = ("search", "pathfinder", "warm-up", "sampling")
+NOT_CONVERGED = '<span class="nc">⚠ DID NOT CONVERGE</span>'
 
 
 def _abs_evidence_error(r: dict, name: str):
@@ -216,31 +239,38 @@ def _summary(results: list[dict], methods: list[str]) -> str:
     for m in methods:
         rs = [r for r in results if r["method"] == m]
         ok = [r for r in rs if r.get("status") == "ok"]
-        accurate = sum(r["posterior_ok"] for r in ok)
+        converged = [r for r in ok if not r.get("not_converged")]
+        accurate = sum(r["posterior_ok"] for r in converged)
         wrong = sum(r.get("confidently_wrong", False) for r in ok)
+        not_conv = [r for r in ok if r.get("not_converged")]
         failed = len(rs) - len(ok)
         names = sorted({n for r in ok for n in r.get("evidence", {})})
         ev = []
         for n in names:
             have = [r for r in ok if n in r.get("evidence", {})]
-            ev.append(f"{EVIDENCE_LABEL.get(n, n)} {sum(_evidence_ok(r, n) for r in have)}/{len(have)}")
+            known = [r for r in have if _evidence_ok(r, n) is not None]
+            unknown = len(have) - len(known)
+            ev.append(f"{EVIDENCE_LABEL.get(n, n)} {sum(_evidence_ok(r, n) for r in known)}/{len(known)}"
+                      + (f" ({unknown} with the true value not known)" if unknown else ""))
         seconds = [r["seconds"] for r in ok if "seconds" in r]
         grads = [r["diagnostics"].get("gradient_evaluations") for r in ok if r.get("diagnostics", {}).get("gradient_evaluations")]
-        flagged = sum(1 for r in ok if r.get("checks_passed") is False)
-        flagged_right = sum(1 for r in ok if r.get("checks_passed") is False and not r["posterior_ok"])
+        ladders = sum(bool(r.get("diagnostics", {}).get("ladder_used")) for r in ok)
         share = accurate / len(ok) if ok else 0
         pill = "good" if share >= 0.95 and not wrong else "mid" if share >= 0.8 else "bad"
         icon = {"good": "✓", "mid": "!", "bad": "✗"}[pill]
+        nc = (f'{NOT_CONVERGED} {len(not_conv)}<br><span class="muted">{sum(r["posterior_ok"] for r in not_conv)} of them accurate anyway</span>'
+              if not_conv else "0")
         rows.append(
             f'<tr><td class="l"><b>{_e(m)}</b><br><span class="muted">{_e(METHODS[m].label)}</span></td>'
             f'<td><span class="pill {pill}">{icon} {accurate}/{len(ok)}</span></td>'
-            f'<td>{wrong}</td><td>{flagged} ({flagged_right} rightly)</td><td>{failed}</td>'
+            f'<td>{wrong}</td><td class="l">{nc}</td><td>{failed}</td>'
             f'<td class="l">{"<br>".join(ev) or "–"}</td>'
-            f'<td>{_num(float(np.median(seconds)), 1) if seconds else "–"}</td>'
-            f'<td>{_num(int(np.median(grads))) if grads else "–"}</td></tr>')
-    return ('<table><tr><th class="l">Method</th><th>Posterior accurate</th><th>Confidently wrong</th><th>Flagged by own checks</th>'
-            '<th>Crashed or timed out</th><th class="l">Evidence within 0.5</th><th>Median seconds</th><th>Median gradient evaluations</th></tr>'
-            + "".join(rows) + "</table>")
+            f'<td>{_num(float(np.median(seconds)), 1) if seconds else "–"}</td><td>{_num(float(np.sum(seconds)), 0) if seconds else "–"}</td>'
+            f'<td>{_num(int(np.median(grads))) if grads else "–"}</td>'
+            f'<td>{"–" if METHODS[m].kind == "smc" else f"{ladders}/{len(ok)}"}</td></tr>')
+    return ('<table><tr><th class="l">Method</th><th>Converged and accurate</th><th>Confidently wrong</th><th class="l">Did not '
+            'converge</th><th>Crashed</th><th class="l">Evidence within 0.5</th><th>Median seconds</th><th>Total seconds</th>'
+            '<th>Median gradient evaluations</th><th>Runs with a ladder</th></tr>' + "".join(rows) + "</table>")
 
 
 def _matrix(results: list[dict], targets: list[str], methods: list[str], info: dict) -> str:
@@ -259,6 +289,8 @@ def _matrix(results: list[dict], targets: list[str], methods: list[str], info: d
             good = sum(r.get("posterior_ok", False) for r in rs)
             wrong = sum(r.get("confidently_wrong", False) for r in rs)
             crashed = sum(r.get("status") != "ok" for r in rs)
+            not_conv = sum(bool(r.get("not_converged")) for r in rs)
+            good = sum(r.get("posterior_ok", False) and not r.get("not_converged") for r in rs)
             pill = "good" if good == len(rs) else "bad" if good == 0 else "mid"
             icon = {"good": "✓", "mid": "!", "bad": "✗"}[pill]
             note = []
@@ -266,10 +298,11 @@ def _matrix(results: list[dict], targets: list[str], methods: list[str], info: d
                 note.append(f"{wrong} confidently wrong")
             if crashed:
                 note.append(f"{crashed} crashed")
+            badge = f'<br><span class="nc">⚠ {not_conv} did not converge</span>' if not_conv else ""
             tip = "; ".join(f"seed {r['seed']}: " + ("accurate" if r.get("posterior_ok") else
                             (r.get("error", "")[:120] if r.get("status") != "ok" else ", ".join(r.get("accuracy", {}).get("failed", []))))
                             for r in rs)
-            cells.append(f'<td title="{_e(tip)}"><span class="pill {pill}">{icon} {good}/{len(rs)}</span>'
+            cells.append(f'<td title="{_e(tip)}"><span class="pill {pill}">{icon} {good}/{len(rs)}</span>' + badge
                          + (f'<br><span class="muted">{_e(", ".join(note))}</span>' if note else "") + "</td>")
         rows.append(f'<tr><td class="l">{_e(t)}</td><td>{info[t]["size"]}</td>' + "".join(cells) + "</tr>")
     return f'<table><tr><th class="l">Target</th><th>Unknowns</th>{head}</tr>' + "".join(rows) + "</table>"
@@ -280,7 +313,7 @@ def _detail(results: list[dict], target: str, info: dict) -> str:
     rows = []
     for r in sorted((r for r in results if r["target"] == target), key=lambda r: (list(METHODS).index(r["method"]), r["seed"])):
         if r.get("status") != "ok":
-            rows.append(f'<tr><td class="l">{_e(r["method"])}</td><td>{r["seed"]}</td><td class="l fail" colspan="12">'
+            rows.append(f'<tr><td class="l">{_e(r["method"])}</td><td>{r["seed"]}</td><td class="l fail" colspan="14">'
                         f'✗ {_e(r.get("status"))}: {_e(r.get("error", "")[:300])}</td></tr>')
             continue
         a, d = r["accuracy"], r.get("diagnostics", {})
@@ -290,12 +323,22 @@ def _detail(results: list[dict], target: str, info: dict) -> str:
                 ev.append(f"{EVIDENCE_LABEL.get(n, n)}: {_e(e.get('error_message', 'none')[:80])}")
             else:
                 se = f" ± {_num(e['standard_error'], 2)}" if e.get("standard_error") is not None else ""
+                if e.get("ok") is None:
+                    ev.append(f'{EVIDENCE_LABEL.get(n, n)}: {_num(e["log_value"], 2)}{se} <span class="muted">(true value not known)</span>')
+                    continue
                 cls = "pass" if e["ok"] else "fail"
                 ev.append(f'{EVIDENCE_LABEL.get(n, n)}: {_num(e["log_value"], 2)}{se} <span class="{cls}">({e["error"]:+.2f})</span>')
         peaks = f"{', '.join(_num(s, 3) for s in a['peak_shares'])}" if "peak_shares" in a else "–"
-        findings = "; ".join(d.get("findings") or []) if d.get("findings") else ("none" if d.get("converged") else "–")
-        status = '<span class="pass">✓ accurate</span>' if r["posterior_ok"] else (
-            f'<span class="fail">✗ {"confidently wrong" if r.get("confidently_wrong") else "inaccurate, flagged"}</span>')
+        findings = d.get("status") or ("; ".join(d.get("findings") or []) or "–")
+        if r.get("not_converged"):
+            status = NOT_CONVERGED + ("<br>(draws accurate anyway)" if r["posterior_ok"] else "<br>(draws inaccurate)")
+        else:
+            status = '<span class="pass">✓ accurate</span>' if r["posterior_ok"] else (
+                f'<span class="fail">✗ {"confidently wrong" if r.get("confidently_wrong") else "inaccurate, flagged"}</span>')
+        choices = "–" if r["method"] == "smc" else (
+            f'{_e(d.get("peak_search") or "–")}<br>'
+            f'{"ladder: " + _e(d.get("ladder_reason")) if d.get("ladder_used") else "no ladder"}'
+            f'<br>{_num(d.get("replicas"))} chains, {_num(d.get("draws_per_chain"))} draws each')
         rows.append(
             f'<tr><td class="l">{_e(r["method"])}</td><td>{r["seed"]}</td><td class="l">{status}</td>'
             f'<td>{_num(a.get("max_abs_mean_error"))}<br><span class="muted">{_e(a.get("worst_quantity", ""))}</span></td>'
@@ -304,14 +347,15 @@ def _detail(results: list[dict], target: str, info: dict) -> str:
             f'<td>{_num(d.get("max_rhat"))}</td><td>{_num(d.get("min_ess"), 0)}</td><td>{_num(d.get("divergences"))}</td>'
             f'<td>{_num(d.get("rungs"))}{"" if d.get("round_trips") is None else " / " + _num(d.get("round_trips"))}</td>'
             f'<td>{_num(d.get("gradient_evaluations"))}</td><td>{_num(r.get("seconds"), 1)}</td>'
-            f'<td class="l">{_e(findings)}</td></tr>')
+            f'<td class="l" style="min-width:180px">{choices}</td><td class="l" style="min-width:260px">{_e(findings)}</td></tr>')
     peaks_note = " Peak weights: the share of draws in each peak, true 0.3 and 0.7." if i.get("has_peaks") else ""
     return (f'<h3 id="{_e(target)}">{_e(target)}</h3><p>{_e(i["description"])}. {i["size"]} unknowns, '
             f'{i["n_quantities"]} checked quantities. Reference: {_e(i["reference_source"])}; true log evidence '
             f'{_num(i["true_log_evidence"], 3)}.{peaks_note}</p><div class="card"><table><tr><th class="l">Method</th><th>Seed</th>'
             '<th class="l">Result</th><th>Worst mean error (sds)</th><th>sd ratio range</th><th>Largest KS distance</th><th>Peak weights</th>'
             '<th class="l">Log evidence (error)</th><th>R-hat</th><th>ESS</th><th>Divergences</th><th>Rungs / round trips</th>'
-            '<th>Gradient evaluations</th><th>Seconds</th><th class="l">Own checks\' findings</th></tr>' + "".join(rows) + "</table></div>")
+            '<th>Gradient evaluations</th><th>Seconds</th><th class="l">What it chose</th><th class="l">Stopping: its own verdict</th></tr>'
+            + "".join(rows) + "</table></div>")
 
 
 def write(run_dir: Path) -> Path:
@@ -355,9 +399,19 @@ def write(run_dir: Path) -> Path:
         f"of the truth; for targets with two peaks, each peak's share of the draws must also be within {PEAK_WEIGHT_LIMIT:g} of its "
         f"true weight. The evidence (log marginal likelihood, log p(data | model)) is accurate when within {EVIDENCE_LIMIT:g} of the "
         "truth. These criteria apply to the worst quantity, so targets with many quantities are held to a stricter standard; "
-        "sampling noise alone gives a worst mean error of about 3 / √ESS.</p><p>A run is <b>confidently wrong</b> when it is "
-        "inaccurate but the method's own checks (R-hat, effective sample size, divergences, round trips) raised nothing. SMC has no "
-        "checks of its own, so every inaccurate SMC run counts as confidently wrong. Hover over a cell or marker for details.</p>")
+        "sampling noise alone gives a worst mean error of about 3 / √ESS.</p><p>The MCMC methods never stop after a fixed number "
+        "of draws: they run until their own convergence tests are met (R-hat below 1.01 and a bulk effective sample size of at "
+        "least 1,600 for every unknown, a tail effective sample size of at least 400, and with a ladder 2 round trips per "
+        f"replica), or until the suite's time limit ({_num(run_info.get('max_seconds'), 0)} s per run), when they return their "
+        f"draws marked {NOT_CONVERGED}; chains without a ladder that warm-up saw in separate peaks are marked the same way. "
+        "Those runs are shown, flagged as suspect, and counted apart. At most 10,000 draws per chain are kept (thinned beyond "
+        "that). A run is <b>confidently "
+        "wrong</b> when it is inaccurate although its convergence tests were met. The default first searches for peaks "
+        "by climbing from many prior draws; every run states the search's detection limit: a peak reached from fewer than "
+        "1 in M prior draws could have been missed. A run with the limit stated but a peak missed below it is not a failure of "
+        "the search, only of what it can promise. SMC does a fixed amount of work and has no "
+        "convergence test of its own, so every inaccurate SMC run counts as confidently wrong. Hover over a cell or marker for "
+        "details.</p>")
 
     parts.append("<h2>Summary</h2><div class='card'>" + _summary(results, methods) + "</div>")
     parts.append("<h2>Accuracy by target</h2><p>Seeds accurate out of seeds run. Hover over a cell for what failed.</p>"
@@ -373,9 +427,9 @@ def write(run_dir: Path) -> Path:
     parts.append("<h2>Worst error in the posterior spread, every target</h2><p>|log(sd ratio)| for the worst quantity: 0.1 is about "
                  "a 10% error. The red line is the criterion (a ratio of 0.9).</p><div class='card'>" + _legend(main) +
                  dot_plot(rows, spread, "worst |log(sd ratio)| (log scale)", 1e-3, -math.log(SD_RATIO_RANGE[0]), "criterion") + "</div>")
-    ev = {m: {t: [_abs_evidence_error(r, EVIDENCE_OF[m]) for r in ok if r["method"] == m and r["target"] == t] for t in rows} for m in main}
-    parts.append("<h2>Error in the evidence, every target</h2><p>|estimated − true log evidence|: stepping stones for the default, "
-                 "bridge sampling for NUTS, SMC's own estimate for SMC. The red line is the criterion.</p><div class='card'>"
+    ev = {m: {t: [_abs_evidence_error(r, _evidence_name(r)) for r in ok if r["method"] == m and r["target"] == t] for t in rows} for m in main}
+    parts.append("<h2>Error in the evidence, every target</h2><p>|estimated − true log evidence|: stepping stones for runs with a "
+                 "ladder, bridge sampling for runs without, SMC's own estimate for SMC. The red line is the criterion.</p><div class='card'>"
                  + _legend(main) + dot_plot(rows, ev, "|error in log evidence| (log scale)", 1e-3, EVIDENCE_LIMIT, "criterion") + "</div>")
     cost = {m: {t: [r.get("diagnostics", {}).get("gradient_evaluations") for r in ok if r["method"] == m and r["target"] == t] for t in rows} for m in main}
     parts.append("<h2>Cost, every target</h2><p>Gradient evaluations per run (one evaluation of the log density and its gradient "
@@ -396,10 +450,46 @@ def write(run_dir: Path) -> Path:
         parts.append("<div class='card'><h3>Worst error in the posterior mean</h3>" + _legend(main) + line_chart(
             by_dim(lambda r: r["accuracy"].get("max_abs_mean_error")), xs, "unknowns", "posterior sds (log scale)", 1e-3, MEAN_ERROR_LIMIT, "criterion") + "</div>")
         parts.append("<div class='card'><h3>Error in the evidence</h3>" + _legend(main) + line_chart(
-            {m: by_dim(lambda r, m=m: _abs_evidence_error(r, EVIDENCE_OF[m]))[m] for m in main}, xs, "unknowns",
+            {m: by_dim(lambda r: _abs_evidence_error(r, _evidence_name(r)))[m] for m in main}, xs, "unknowns",
             "|error in log evidence| (log scale)", 1e-3, EVIDENCE_LIMIT, "criterion") + "</div>")
         parts.append("<div class='card'><h3>Gradient evaluations</h3>" + _legend(main) + line_chart(
             by_dim(lambda r: r.get("diagnostics", {}).get("gradient_evaluations")), xs, "unknowns", "gradient evaluations (log scale)", 1.0) + "</div>")
+
+    stopped = [r for r in ok if r.get("not_converged")]
+    parts.append(f"<h2>Runs that did not converge {NOT_CONVERGED if stopped else ''}</h2>")
+    if stopped:
+        body = "".join(f'<tr><td class="l"><a href="#{_e(r["target"])}">{_e(r["target"])}</a></td><td class="l">{_e(r["method"])}</td>'
+                       f'<td>{r["seed"]}</td><td class="l">{"accurate anyway" if r["posterior_ok"] else _e("; ".join(r["accuracy"].get("failed", [])))}</td>'
+                       f'<td class="l">{_e(r.get("diagnostics", {}).get("status", ""))}</td></tr>'
+                       for r in sorted(stopped, key=lambda r: (r["method"], r["target"], r["seed"])))
+        parts.append(f"<p>{len(stopped)} runs stopped without meeting their convergence tests: at the time limit, or (chains "
+                     "without a ladder) because warm-up saw the chains in separate peaks, whose weights such chains cannot "
+                     "estimate. Their draws are suspect and are not counted as accurate or as confidently wrong.</p><div "
+                     "class='card'><table><tr>"
+                     "<th class='l'>Target</th><th class='l'>Method</th><th>Seed</th><th class='l'>The draws against the truth</th>"
+                     "<th class='l'>Status</th></tr>" + body + "</table></div>")
+    else:
+        parts.append("<p>None: every MCMC run met its convergence tests.</p>")
+
+    choosers = [r for r in ok if r["method"] == "default"]
+    if choosers:
+        body = "".join(
+            f'<tr><td class="l"><a href="#{_e(r["target"])}">{_e(r["target"])}</a></td><td>{r["seed"]}</td>'
+            f'<td>{_num(d.get("starts_used"))}</td><td>{_num(d.get("peaks_found"))}</td><td>{_e(_one_in(d))}</td>'
+            f'<td class="l">{_e(d.get("ladder_reason")) if d.get("ladder_used") else "no"}</td><td>{_num(d.get("rungs"))}</td>'
+            f'<td>{_num(d.get("replicas"))}</td><td>{_e(d.get("mass_matrix", "–"))}</td>'
+            f'<td>{_num(sum(w.get("scans", 0) for w in d.get("warmup") or []))}</td><td>{_num(d.get("draws_per_chain"))}</td>'
+            f'<td>{_num(r.get("seconds"), 1)}</td><td class="l">{_e(" / ".join(_num((d.get("timings") or {}).get(k), 0) for k in PHASES))}</td></tr>'
+            for r in sorted(choosers, key=lambda r: (targets.index(r["target"]), r["seed"])) for d in [r.get("diagnostics", {})])
+        parts.append("<h2>What the default chose</h2><p>Per run: how many climbs from prior draws the peak search made "
+                     "and how many separate peaks they reached (only end points certified as peaks count); its detection limit (a "
+                     "peak reached from fewer than this share of prior draws could have been missed: with N starts, ln 20 / N, "
+                     "the share found with 95% probability); whether a ladder was used and why (several peaks found by the search, "
+                     "or chains that settled in separate peaks or kept disagreeing during warm-up); and how long warm-up and "
+                     "sampling ran, both set by the convergence tests.</p><div class='card'><table><tr><th class='l'>Target</th>"
+                     "<th>Seed</th><th>Starts</th><th>Peaks</th><th>Could miss a peak reached from fewer than</th><th class='l'>Ladder</th><th>Rungs</th><th>Chains</th><th>Mass matrix</th>"
+                     "<th>Warm-up scans</th><th>Draws per chain</th><th>Seconds</th><th class='l'>Seconds by phase: search / "
+                     "Pathfinder / warm-up / sampling</th></tr>" + body + "</table></div>")
 
     wrong = [r for r in ok if r.get("confidently_wrong")]
     parts.append("<h2>Confidently wrong runs</h2>")
@@ -408,7 +498,8 @@ def write(run_dir: Path) -> Path:
                        f'<td>{r["seed"]}</td><td class="l">{_e("; ".join(r["accuracy"].get("failed", [])))}</td>'
                        f'<td>{_num(r.get("diagnostics", {}).get("max_rhat"))}</td><td>{_num(r.get("diagnostics", {}).get("min_ess"), 0)}</td></tr>'
                        for r in sorted(wrong, key=lambda r: (r["method"], r["target"], r["seed"])))
-        parts.append(f"<p>{len(wrong)} runs were inaccurate while their own checks raised nothing.</p><div class='card'><table>"
+        parts.append(f"<p>{len(wrong)} runs were inaccurate although their convergence tests were met (or, for SMC, with no test "
+                     "to fail).</p><div class='card'><table>"
                      "<tr><th class='l'>Target</th><th class='l'>Method</th><th>Seed</th><th class='l'>What was wrong</th><th>R-hat</th><th>ESS</th></tr>"
                      + body + "</table></div>")
     else:

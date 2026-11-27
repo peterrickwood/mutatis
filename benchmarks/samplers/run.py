@@ -1,11 +1,17 @@
 """The benchmark's suites and schedule: which runs, in how many parallel processes, resuming from results already recorded.
 
 Suites:
-- `short` (the default): a representative subset that covers every kind of target at a spread of sizes, the three main
-  methods with two seeds, and the variants of the default on a handful of targets. Sized to finish in about an hour on an
-  8-core machine.
-- `long`: every target and size (including larger ones), all methods, more seeds. Meant for a machine with hundreds of cores,
+- `short` (the default): a representative subset that covers every kind of target at a spread of sizes, the four main
+  methods with two seeds. Sized to finish in about an hour on an 8-core machine.
+- `long`: every target and size (including larger ones), all methods, more seeds; and the held-out Inference Gym targets
+  (`pip install -e ".[benchmarks]"`), with the main methods only.
+- `held_out`: a small check that the default works on problems it was not tuned on: the Inference Gym targets except the
+  largest, the default method only, 2 seeds. The full held-out check is in `long`. Meant for a machine with hundreds of cores,
   for example `python -m benchmarks.samplers --suite long --jobs 180` on 192, within a day.
+
+The MCMC methods run until their convergence tests are met; each suite gives them a time limit (`max_seconds`), after which a
+run returns its draws flagged as not converged. The process timeout is well above it, so a run is killed only if something
+hangs.
 
 Each run is a separate process pinned to its own CPUs (`--threads` of them, default 1), so that many processes do not fight
 over the cores. The pinning uses the CPU affinity mask (`os.sched_setaffinity`), set by the worker before JAX starts: XLA
@@ -26,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from benchmarks.samplers.methods import MAIN, METHODS
-from benchmarks.samplers.targets import TARGETS
+from benchmarks.samplers.targets import GYM, TARGETS
 
 REPO = Path(__file__).resolve().parents[2]
 RESULTS = Path(__file__).resolve().parent / "results"
@@ -42,35 +48,57 @@ class Suite:
     main_seeds: int
     variant_targets: tuple
     variant_seeds: int
-    timeout: float           # seconds before a run is stopped and recorded as failed
+    max_seconds: float       # the MCMC methods' time limit: then they return, flagged as not converged
+    timeout: float           # seconds before a run's process is stopped and the run recorded as failed
+    held_out_targets: tuple = ()   # targets the sampler's rules were never tuned on (Inference Gym), with their own methods
+    held_out_seeds: int = 0
+    held_out_methods: tuple = MAIN
 
-    def tasks(self) -> list[dict]:
+    def tasks(self, methods: tuple | None = None) -> list[dict]:
+        """Every run the suite plans; with `methods`, those methods in place of the main ones on the main targets, and nothing else."""
+        if methods is not None:
+            unknown = [m for m in methods if m not in METHODS]
+            if unknown:
+                raise ValueError(f"unknown methods {unknown}: use some of {list(METHODS)}")
+            return [{"target": target, "method": m, "seed": s} for target in TARGETS if target in self.main_targets
+                    for m in methods for s in range(self.main_seeds)]
         out = []
         for target in TARGETS:   # in the registry's order, so similar targets run together
             if target in self.main_targets:
                 out += [{"target": target, "method": m, "seed": s} for m in MAIN for s in range(self.main_seeds)]
             if target in self.variant_targets:
                 out += [{"target": target, "method": m, "seed": s} for m in VARIANTS for s in range(self.variant_seeds)]
+            if target in self.held_out_targets:
+                out += [{"target": target, "method": m, "seed": s} for m in self.held_out_methods for s in range(self.held_out_seeds)]
         return out
 
 
 SHORT = Suite(
-    "short", "every kind of target at a spread of sizes, leaving out the most expensive; the three main methods with 2 seeds; "
-    "the four variants of the default with 1 seed on 4 targets",
+    "short", "every kind of target at a spread of sizes, leaving out the most expensive; the four main methods with 2 seeds; "
+    "MCMC time limit 600 s per run",
     main_targets=("normal_means_d2", "normal_means_d10", "normal_means_d50", "correlated_normal_d10_c100", "correlated_normal_d10_c10000",
-                  "scales_d20", "two_peaks_d1", "two_peaks_d5", "two_peaks_d20", "banana_d2_strong", "banana_d10_mild", "funnel_d10",
+                  "scales_d20", "two_peaks_d1", "two_peaks_d5", "two_peaks_d20", "two_equal_peaks_d5", "two_equal_peaks_d20", "banana_d2_strong", "banana_d10_mild", "funnel_d10",
                   "student_t_d10", "conjugate_regression_n2_p1", "conjugate_regression_n2_p4", "hidden_level_shocks_T50", "forward_looking"),
     main_seeds=2,
-    variant_targets=("normal_means_d10", "two_peaks_d5", "funnel_d10", "conjugate_regression_n2_p1"),
-    variant_seeds=1,
-    timeout=1800.0)
+    variant_targets=(),
+    variant_seeds=0,
+    max_seconds=600.0,
+    timeout=1500.0)
 
+OURS = tuple(t for t in TARGETS if t not in GYM)
 LONG = Suite(
-    "long", "every target and size, including larger ones; the three main methods with 8 seeds; the four variants of the "
-    "default with 4 seeds on every target",
-    main_targets=tuple(TARGETS), main_seeds=8, variant_targets=tuple(TARGETS), variant_seeds=4, timeout=6 * 3600.0)
+    "long", "every target and size, including larger ones; the four main methods with 8 seeds; the four variants with 4 seeds "
+    "on every target; the held-out Inference Gym targets with the four main methods and 4 seeds; MCMC time limit 3 hours per run",
+    main_targets=OURS, main_seeds=8, variant_targets=OURS, variant_seeds=4, max_seconds=3 * 3600.0, timeout=4 * 3600.0,
+    held_out_targets=tuple(GYM), held_out_seeds=4)
 
-SUITES = {s.name: s for s in (SHORT, LONG)}
+HELD_OUT = Suite(
+    "held_out", "the held-out Inference Gym targets except the largest (stochastic volatility over 2,516 days, 2,519 unknowns); "
+    "the default method only, 2 seeds; MCMC time limit 600 s per run",
+    main_targets=(), main_seeds=0, variant_targets=(), variant_seeds=0, max_seconds=600.0, timeout=1500.0,
+    held_out_targets=tuple(t for t in GYM if t != "gym_stochastic_volatility"), held_out_seeds=2, held_out_methods=("default",))
+
+SUITES = {s.name: s for s in (SHORT, LONG, HELD_OUT)}
 
 
 def cpu_groups(jobs: int, threads: int) -> list[str]:
@@ -110,10 +138,10 @@ def _log(text: str):
     print(text, flush=True)   # flushed, so a log file shows progress while the suite runs
 
 
-def run(run_dir: Path, suite: Suite, jobs: int, threads: int = 1, limit: int | None = None, log=_log) -> Path:
+def run(run_dir: Path, suite: Suite, jobs: int, threads: int = 1, limit: int | None = None, log=_log, methods: tuple | None = None) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     path, info_path = run_dir / "results.jsonl", run_dir / "run.json"
-    task_list = suite.tasks()[:limit] if limit else suite.tasks()
+    task_list = suite.tasks(methods)[:limit] if limit else suite.tasks(methods)
     done = set()
     if path.exists():
         for line in path.read_text().splitlines():
@@ -121,7 +149,8 @@ def run(run_dir: Path, suite: Suite, jobs: int, threads: int = 1, limit: int | N
             done.add((r["target"], r["method"], r["seed"]))
     todo = [t for t in task_list if (t["target"], t["method"], t["seed"]) not in done]
     info = json.loads(info_path.read_text()) if info_path.exists() else {"suite": suite.name, "description": suite.description, "sessions": []}
-    info |= {"planned_runs": len(task_list), "jobs": jobs, "threads_per_job": threads, "cpus_available": len(os.sched_getaffinity(0))}
+    info |= {"planned_runs": len(task_list), "jobs": jobs, "threads_per_job": threads, "cpus_available": len(os.sched_getaffinity(0)),
+             "max_seconds": suite.max_seconds}
     session = {"start": time.strftime("%Y-%m-%d %H:%M:%S"), "runs": len(todo)}
     log(f"suite {suite.name}: {len(task_list)} runs, {len(done)} already recorded, {len(todo)} to do, {jobs} at a time, {threads} CPU(s) each")
     started = time.perf_counter()
@@ -134,7 +163,8 @@ def run(run_dir: Path, suite: Suite, jobs: int, threads: int = 1, limit: int | N
     def one(task):
         cpus = free.get()
         try:
-            result, problem = _call(["--target", task["target"], "--method", task["method"], "--seed", str(task["seed"])], suite.timeout, cpus)
+            result, problem = _call(["--target", task["target"], "--method", task["method"], "--seed", str(task["seed"]),
+                                     "--max-seconds", str(suite.max_seconds)], suite.timeout, cpus)
         finally:
             free.put(cpus)
         if result is None:
@@ -149,7 +179,8 @@ def run(run_dir: Path, suite: Suite, jobs: int, threads: int = 1, limit: int | N
         futures = [pool.submit(one, t) for t in todo]
         for i, future in enumerate(as_completed(futures), 1):
             r = future.result()
-            status = r["status"] if r["status"] != "ok" else ("accurate" if r["posterior_ok"] else "INACCURATE")
+            status = r["status"] if r["status"] != "ok" else ("accurate" if r["posterior_ok"] else "INACCURATE") + (
+                ", DID NOT CONVERGE" if r.get("not_converged") else "")
             log(f"[{i}/{len(todo)}, {time.perf_counter() - started:.0f} s] {r['target']} {r['method']} seed {r['seed']}: {status}"
                 + (f", {r['seconds']:.1f} s" if "seconds" in r else "") + (f" ({str(r.get('error', ''))[:200]})" if r["status"] != "ok" else ""))
     session |= {"end": time.strftime("%Y-%m-%d %H:%M:%S"), "seconds": time.perf_counter() - started}

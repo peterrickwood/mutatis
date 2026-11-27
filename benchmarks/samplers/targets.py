@@ -130,13 +130,19 @@ def varied_scales(d: int = 20) -> Gaussian:
 
 
 class TwoPeaks(DensityTarget):
-    """Two normal peaks: weight 0.3 with sd 1 and weight 0.7 with sd 0.3, centres 10 apart along the diagonal."""
+    """Two normal peaks, weights 0.3 and 0.7, centres 10 apart along the diagonal.
 
-    weights, sds, separation = (0.3, 0.7), (1.0, 0.3), 10.0
+    By default the heavier peak is narrow (sd 0.3 against 1): the hard case. Its catchment (where its own density is the larger
+    of the two) holds 1 in 8,800 prior draws in 5 dimensions and 1 in 9 x 10^13 in 20, so a search that starts from prior draws
+    rarely or never finds it. With equal widths (`sds=(1, 1)`) each catchment holds about half the prior draws: the easy case.
+    (Exact values, checked in tests/benchmarks/test_targets.py.)"""
 
-    def __init__(self, d: int):
-        self.name, self.group, self.size, self.c = f"two_peaks_d{d}", "Two separated peaks", d, -3.0
-        self.description = (f"Two normal peaks in {d} dimensions, weights 0.3 and 0.7, standard deviations 1 and 0.3, "
+    weights, separation = (0.3, 0.7), 10.0
+
+    def __init__(self, d: int, sds: tuple[float, float] = (1.0, 0.3), name: str = "two_peaks"):
+        self.sds = sds
+        self.name, self.group, self.size, self.c = f"{name}_d{d}", "Two separated peaks", d, -3.0
+        self.description = (f"Two normal peaks in {d} dimensions, weights 0.3 and 0.7, standard deviations {sds[0]:g} and {sds[1]:g}, "
                             f"centres {self.separation:g} apart")
         u = np.ones(d) / np.sqrt(d)
         self.centres = (-self.separation / 2 * u, self.separation / 2 * u)
@@ -588,6 +594,36 @@ def forward_looking(periods: int = 150) -> ModelTarget:
 
 # ---------------------------------------------------------------------------------------------------------------------------
 
+# Held-out targets from Google's Inference Gym, wrapped in benchmarks/samplers/inference_gym.py (built only when run, as they
+# need the benchmarks extra). Name in the suite -> (Inference Gym class, description). Only targets with a ground-truth mean and standard deviation, and
+# without the TensorFlow Datasets download (which needs TensorFlow itself).
+GYM = {
+    "gym_banana": ("Banana", "Haario's banana in 2 dimensions (Inference Gym's version)"),
+    "gym_ill_conditioned_gaussian": ("IllConditionedGaussian", "Normal in 100 dimensions with widely spread scales"),
+    "gym_neals_funnel": ("NealsFunnel", "Neal's funnel in 10 dimensions"),
+    "gym_eight_schools": ("EightSchools", "Eight schools, centred: a hierarchical model with a funnel (10 unknowns)"),
+    "gym_brownian_motion_missing_middle": ("BrownianMotionMissingMiddleObservations",
+                                           "Hidden random walk observed with noise, middle observations missing (30 unknowns)"),
+    "gym_brownian_motion_unknown_scales": ("BrownianMotionUnknownScalesMissingMiddleObservations",
+                                           "The same with unknown shock and noise sizes: path and scales together (32 unknowns)"),
+    "gym_lorenz_bridge": ("ConvectionLorenzBridge", "Hidden path of a nonlinear (Lorenz) system, partly observed (90 unknowns)"),
+    "gym_lorenz_bridge_unknown_scales": ("ConvectionLorenzBridgeUnknownScales",
+                                         "The same with unknown shock and noise sizes (92 unknowns)"),
+    "gym_stochastic_volatility_small": ("StochasticVolatilitySP500Small",
+                                        "Stochastic volatility of 100 days of S&P 500 returns (103 unknowns)"),
+    "gym_stochastic_volatility": ("StochasticVolatilitySP500",
+                                  "Stochastic volatility of 2,516 days of S&P 500 returns (2,519 unknowns)"),
+    "gym_item_response_theory": ("SyntheticItemResponseTheory", "Item response model on synthetic data (501 unknowns)"),
+    "gym_log_gaussian_cox_process": ("SyntheticLogGaussianCoxProcess",
+                                     "Log-Gaussian Cox process on synthetic counts (102 unknowns)"),
+}
+
+
+def _gym_target(name: str) -> Target:
+    from benchmarks.samplers.inference_gym import build as build_gym
+    return build_gym(name)
+
+
 TARGETS: dict[str, Callable[[], Target]] = {}
 for _d in (2, 10, 50, 100, 200, 500):
     TARGETS[f"normal_means_d{_d}"] = lambda d=_d: NormalMeans(d)
@@ -597,6 +633,8 @@ for _d in (10, 50, 100):
 TARGETS["scales_d20"] = lambda: varied_scales(20)
 for _d in (1, 5, 20, 50):
     TARGETS[f"two_peaks_d{_d}"] = lambda d=_d: TwoPeaks(d)
+for _d in (5, 20):
+    TARGETS[f"two_equal_peaks_d{_d}"] = lambda d=_d: TwoPeaks(d, (1.0, 1.0), "two_equal_peaks")
 TARGETS["banana_d2_strong"] = lambda: Banana(2, 0.1, "strong")
 TARGETS["banana_d10_mild"] = lambda: Banana(10, 0.03, "mild")
 TARGETS["banana_d50_mild"] = lambda: Banana(50, 0.03, "mild")
@@ -609,6 +647,8 @@ for _n, _p in ((2, 1), (2, 4), (4, 1), (4, 4), (6, 2)):
 for _t in (50, 200, 400):
     TARGETS[f"hidden_level_shocks_T{_t}"] = lambda t=_t: hidden_level_shocks(t)
 TARGETS["forward_looking"] = forward_looking
+for _name in GYM:
+    TARGETS[_name] = lambda name=_name: _gym_target(name)
 
 
 def build(name: str) -> Target:

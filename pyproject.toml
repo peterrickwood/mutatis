@@ -30,6 +30,12 @@ dev = [
     "statsmodels>=0.14",
     "beartype>=0.18",
 ]
+# The held-out Inference Gym targets of the long benchmark suite (benchmarks/samplers/inference_gym.py). TensorFlow Probability's
+# nightly build, pinned, because its last release (0.25) does not work with JAX 0.12.
+benchmarks = [
+    "inference-gym==0.0.5",
+    "tfp-nightly==0.26.0.dev20261126",
+]
 
 [tool.setuptools.packages.find]
 include = ["mutatis*"]

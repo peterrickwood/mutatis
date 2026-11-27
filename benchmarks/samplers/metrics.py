@@ -63,8 +63,12 @@ def accuracy(target, particles: np.ndarray, weights: np.ndarray) -> dict:
 
 
 def evidence_accuracy(estimate: float | None, standard_error: float | None, truth: float) -> dict:
+    """`ok` is None when the true log evidence is not known (NaN: the Inference Gym's Bayesian models)."""
     if estimate is None or not np.isfinite(estimate):
-        return {"log_value": None, "standard_error": standard_error, "error": None, "ok": False}
+        return {"log_value": None, "standard_error": standard_error, "error": None, "ok": None if np.isnan(truth) else False}
+    if np.isnan(truth):
+        return {"log_value": float(estimate), "standard_error": None if standard_error is None else float(standard_error),
+                "error": None, "ok": None}
     error = float(estimate - truth)
     return {"log_value": float(estimate), "standard_error": None if standard_error is None else float(standard_error),
             "error": error, "ok": abs(error) <= EVIDENCE_LIMIT}

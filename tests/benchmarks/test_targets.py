@@ -27,7 +27,7 @@ KS_CRITICAL = 1.95 / np.sqrt(N)   # Kolmogorov-Smirnov critical value at the 0.1
 DENSITY_TARGETS = ["correlated_normal_d10_c100", "correlated_normal_d10_c10000", "scales_d20", "two_peaks_d1", "two_peaks_d5",
                    "two_peaks_d20", "banana_d2_strong", "banana_d10_mild", "funnel_d10", "student_t_d10", "student_t_d50",
                    "correlated_normal_d50_c10000", "correlated_normal_d100_c10000", "two_peaks_d50", "banana_d50_mild", "funnel_d20",
-                   "student_t_d100"]
+                   "student_t_d100", "two_equal_peaks_d5", "two_equal_peaks_d20"]
 
 
 def _independent_log_density(t, z):
@@ -81,6 +81,38 @@ def test_banana_twisted_coordinate_distribution_by_adaptive_quadrature():
         kink = y + 100.0 * t.b
         exact = sum(si.quad(inner, a, c, epsabs=1e-13, limit=200)[0] for a, c in [(-12, min(kink, 12)), (min(kink, 12), 12)] if c > a)
         assert abs(t.reference.cdfs[1](y) - exact) < 2e-5, y
+
+
+def _heavier_peak_catchment(t) -> float:
+    """The share of prior draws (normal, centre 0, the same sd s on every unknown) where the heavier peak's own density is the
+    larger, exactly. The region is a|z - cb|^2 - b|z - ca|^2 < k with a = 1/(2 sb^2), b = 1/(2 sa^2): a half-space when the
+    widths are equal, otherwise a ball, whose prior probability is a noncentral chi-square probability."""
+    s = float(t.prior_sd[0])
+    assert np.allclose(np.asarray(t.prior_sd), s)
+    (sa, sb), (ca, cb), (wa, wb), d = t.sds, t.centres, t.weights, t.size
+    k = np.log(wb / wa) - d * np.log(sb / sa)
+    a, b = 1 / (2 * sb**2), 1 / (2 * sa**2)
+    if a == b:
+        gap = np.linalg.norm(cb - ca)
+        return float(ss.norm.sf((a * (cb @ cb - ca @ ca) - k) / (2 * a * gap) / s))
+    centre = (a * cb - b * ca) / (a - b)
+    radius2 = (k + (a - b) * centre @ centre - a * cb @ cb + b * ca @ ca) / (a - b)
+    return float(ss.ncx2.cdf(radius2 / s**2, d, centre @ centre / s**2))
+
+
+@pytest.mark.parametrize("name, stated", [("two_peaks_d5", 1 / 8800), ("two_peaks_d20", 1.1e-14), ("two_equal_peaks_d5", 0.5),
+                                          ("two_equal_peaks_d20", 0.5)])
+def test_two_peak_catchments_hold_the_stated_share_of_prior_draws(name, stated):
+    """The hard and easy two-peak targets differ in how many prior draws fall where the heavier peak dominates (stated in
+    TwoPeaks' docstring): the exact share against 1,000,000 prior draws (within 5 binomial standard errors), and against the
+    stated figure to its two significant figures."""
+    t = T.build(name)
+    exact = _heavier_peak_catchment(t)
+    assert abs(exact - stated) <= 0.05 * stated or (stated == 0.5 and abs(exact - 0.5) < 0.005), exact
+    n = 1_000_000
+    z = np.asarray(jax.vmap(t.draw_prior)(jax.random.split(jax.random.key(0), n)))
+    share = np.mean(t.peak_of(z) == 1)
+    assert abs(share - exact) <= 5 * np.sqrt(exact * (1 - exact) / n) + 1 / n, (share, exact)
 
 
 def test_evidence_device_integrates_to_exp_c_in_one_dimension():

@@ -72,3 +72,6 @@ def test_non_finite_draws_fail():
 def test_evidence_accuracy():
     assert evidence_accuracy(-10.3, 0.1, -10.0)["ok"] and not evidence_accuracy(-10.6, 0.1, -10.0)["ok"]
     assert not evidence_accuracy(None, None, -10.0)["ok"] and not evidence_accuracy(float("nan"), None, -10.0)["ok"]
+    unknown = evidence_accuracy(-10.3, 0.1, float("nan"))
+    assert unknown["ok"] is None and unknown["error"] is None and unknown["log_value"] == -10.3
+    assert evidence_accuracy(None, None, float("nan"))["ok"] is None

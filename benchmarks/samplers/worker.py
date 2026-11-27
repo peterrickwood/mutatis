@@ -1,6 +1,6 @@
 """One benchmark run: one method on one target with one seed, in its own process. Prints one line, "RESULT {json}".
 
-    python -m benchmarks.samplers.worker --target normal_means_d10 --method default --seed 0
+    python -m benchmarks.samplers.worker --target normal_means_d10 --method adaptive --seed 0 --max-seconds 600
     python -m benchmarks.samplers.worker --target forward_looking --reference-only     (build and cache the reference)
 """
 
@@ -28,8 +28,10 @@ from benchmarks.samplers import methods as m  # noqa: E402
 from benchmarks.samplers.metrics import accuracy, evidence_accuracy  # noqa: E402
 from benchmarks.samplers.targets import build  # noqa: E402
 
-DIAGNOSTICS = ("max_rhat", "min_ess", "divergences", "rungs", "barrier", "round_trips", "replicas", "gradient_evaluations",
-               "density_evaluations", "converged", "findings", "reference", "step")
+DIAGNOSTICS = ("max_rhat", "min_ess", "min_tail_ess", "divergences", "rungs", "barrier", "round_trips", "replicas", "processes",
+               "gradient_evaluations", "density_evaluations", "converged", "status", "stopped_by", "phase", "findings", "reference",
+               "step", "draws_per_chain", "starts_used", "peaks_found", "ladder_used", "ladder_reason", "escalated", "mass_matrix",
+               "warmup", "timings", "draws_kept_per_chain", "thinned_by", "search", "peak_search")
 
 
 def _plain(value):
@@ -54,7 +56,7 @@ def target_record(target) -> dict:
             "has_peaks": ref.peak_weights is not None}
 
 
-def run_one(target_name: str, method_name: str, seed: int) -> dict:
+def run_one(target_name: str, method_name: str, seed: int, max_seconds: float = 600.0) -> dict:
     record = {"method": method_name, "seed": seed, "host": platform.node(), "cpus": sorted(os.sched_getaffinity(0))}
     target = build(target_name)
     record |= target_record(target)
@@ -62,7 +64,7 @@ def run_one(target_name: str, method_name: str, seed: int) -> dict:
     key_run, key_evidence = jax.random.split(jax.random.key(seed))
     start = time.perf_counter()
     try:
-        posterior = m.run(method, target, key_run)
+        posterior = m.run(method, target, key_run, max_seconds)
     except Exception as error:
         return record | {"status": "error", "error": f"{type(error).__name__}: {error}", "traceback": traceback.format_exc(limit=4),
                          "seconds": time.perf_counter() - start, "posterior_ok": False, "confidently_wrong": False}
@@ -81,9 +83,11 @@ def run_one(target_name: str, method_name: str, seed: int) -> dict:
         else:
             value, se, seconds = estimate
             record["evidence"][name] = evidence_accuracy(value, se, target.reference.log_evidence) | {"seconds": seconds}
-    checks_passed = record["diagnostics"].get("converged")   # None: the method has no checks of its own (SMC)
+    # converged: the method's own convergence tests were met (None: the method has none, as SMC). A run that stopped at its
+    # time limit is "not converged": its results are shown, flagged as suspect, and never counted as confidently wrong.
+    checks_passed = record["diagnostics"].get("converged")
     ok = record["accuracy"]["posterior_ok"]
-    record |= {"status": "ok", "posterior_ok": ok, "checks_passed": checks_passed,
+    record |= {"status": "ok", "posterior_ok": ok, "checks_passed": checks_passed, "not_converged": checks_passed is False,
                "confidently_wrong": (not ok) and (checks_passed is not False)}
     return record
 
@@ -93,6 +97,7 @@ def main():
     parser.add_argument("--target", required=True)
     parser.add_argument("--method")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--max-seconds", type=float, default=600.0, help="the MCMC methods' time limit")
     parser.add_argument("--reference-only", action="store_true")
     args = parser.parse_args()
     if args.reference_only:
@@ -100,7 +105,7 @@ def main():
         target = build(args.target)
         print("RESULT " + json.dumps(_plain(target_record(target) | {"seconds": time.perf_counter() - start})), flush=True)
         return
-    print("RESULT " + json.dumps(_plain(run_one(args.target, args.method, args.seed))), flush=True)
+    print("RESULT " + json.dumps(_plain(run_one(args.target, args.method, args.seed, args.max_seconds))), flush=True)
 
 
 if __name__ == "__main__":
