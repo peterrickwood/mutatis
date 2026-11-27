@@ -12,11 +12,22 @@ Questions raised in discussion and set aside, to come back to. When one is settl
    fallback to counting roots for the failing draws only. Suggested: the first. Source: the numerical audit, decisions 34
    and 35.
 
-2. **Which sampler `estimate()` chooses automatically (raised 2026-11-26).** Decided in discussion: the default is the
-   general sampler (decision 41: NUTS steps, a tempering ladder, 4 replicas, checks), with the evidence as a separate,
-   optional step, and SMC kept for comparison. Open: switching `estimate()`'s automatic choice from SMC and NUTS to it, once
-   the sampler benchmark (`python -m benchmarks.samplers`) has been reviewed. SMC's failures with many unknowns are in
-   decision 38.
+2. **The default sampler, and which one `estimate()` chooses automatically (raised 2026-11-26; reopened 2026-11-27 for
+   a separate design session).** Settled: a general sampler with selectable step rule, ladder, replicas, starts and
+   checks (decision 41); the evidence as a separate, optional step; SMC kept for comparison. Open: which settings make a
+   good default, given the short benchmark suite (`python -m benchmarks.samplers`, report in
+   `benchmarks/samplers/results/short-1/`), and only then whether `estimate()`'s automatic choice moves to it. From that
+   suite:
+   - Accurate: the ladder 26/33, single-rung NUTS 23/34, SMC 21/34. Confidently wrong (wrong with checks passing): 2, 5
+     and 13. Median time per run: 67 s, 20 s and 10 s; the ladder costs 3 to 30+ times NUTS where the prior is much wider
+     than the posterior (34 rungs and over 1,500 s on the 21-unknown regression).
+   - The ladder does not join two peaks of unequal width in 20 dimensions (all methods put every draw in the wide peak,
+     and the ladder's checks passed): a known limit of tempering (Woodard, Schmidler and Huber 2009). More starts would
+     raise the chance that the checks see it, not fix it.
+   - The ladder's checks raised false alarms on 8 of its 26 accurate runs: too few round trips on long ladders, and
+     divergent trajectories on the banana and hidden-level targets.
+   - Round trips fall well below the formula for exact moves (0 against at most about 46 on the 49-rung ladder); being
+     investigated separately, since it may be a defect that also lengthens ladders.
 
 3. **Range acceptance criterion for Read (2022) (decision 32, raised 2026-11-26).** Stage 1's test requires our range
    bounds to be exact rather than to match Read's published numbers, because his are not always exact (decision 28). This
