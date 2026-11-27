@@ -17,7 +17,7 @@ From *mutatis mutandis*, "the necessary changes having been made": change one as
 
 ## Status
 
-Under construction: stage 0 (foundations) is built and stage 1 (Read's SVAR) is in progress. The design lives in these documents — read them before proposing or building anything:
+Under construction: stages 0 to 3 are built (foundations, Read's SVAR, a textbook DSGE, the read-only web inspector); stage 4 (the larger DSGE and its housing expansion) has started and waits on decisions listed in PLAN.md. The design lives in these documents — read them before proposing or building anything:
 
 - [README.md](README.md) — what mutatis is: the concepts and the framework choices. No planning or staging goes in it.
 - [PLAN.md](PLAN.md) — the implementation plan and staging, with the status of each stage.

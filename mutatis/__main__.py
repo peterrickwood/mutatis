@@ -1,8 +1,9 @@
-"""The one generic command: python -m mutatis {simulate, run, compare}.
+"""The one generic command: python -m mutatis {simulate, run, compare, inspect}.
 
     python -m mutatis simulate MODEL.yaml --params PARAMS.yaml --periods 200 --out data.csv
     python -m mutatis run MODEL.yaml --data data.csv [--edits EDITS.yaml] [--store results] [--seed 0] [--particles 2000]
     python -m mutatis compare results/KEY_A results/KEY_B
+    python -m mutatis inspect results [--port 8765]      a read-only web page over a results store
 
 Every model goes through the same commands; nothing here knows what kind of model it is.
 """
@@ -39,7 +40,20 @@ def main(argv=None) -> int:
     cmp_ = commands.add_parser("compare", help="compare two stored results")
     cmp_.add_argument("first")
     cmp_.add_argument("second")
+    ins = commands.add_parser("inspect", help="serve a read-only web page over a results store: graphs, equations, priors against posteriors, fit, comparisons")
+    ins.add_argument("store", help="a results store folder (or one run's folder)")
+    ins.add_argument("--port", type=int, default=8765)
+    ins.add_argument("--host", default="127.0.0.1", help="the address to listen on; the default answers this computer only")
     args = parser.parse_args(argv)
+
+    if args.command == "inspect":
+        from mutatis.web.server import serve
+
+        if not Path(args.store).is_dir():
+            print(f"no results store at {args.store}: give the folder that `run --store` wrote to", file=sys.stderr)
+            return 2
+        serve(args.store, port=args.port, host=args.host)
+        return 0
 
     from mutatis.spec.yaml_io import load_model
     from mutatis.versions import run as runs

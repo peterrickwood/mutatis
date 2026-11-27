@@ -35,6 +35,8 @@ def test_demonstrations_contain_no_code():
         ("mutatis.solve.linear", "from mutatis.infer import posterior", False, "may not import the later layer infer"),
         ("mutatis.compile", "from mutatis.library import household", True, "nothing may import library"),
         ("mutatis.versions.store", "import mutatis.io.dynare", False, "nothing may import io"),
+        ("mutatis.versions.run", "from mutatis.web import server", False, "nothing may import web"),
+        ("mutatis.library.household", "from mutatis.web.graph import block_graph", False, "nothing may import web"),
         ("mutatis", "from mutatis import numerics", True, "top-level package must not import layers"),
         ("mutatis.extra.thing", "from mutatis.spec import model", False, "not a known layer"),
     ],
@@ -52,6 +54,8 @@ def test_import_checker_catches(module, source, is_pkg, expected):
         ("mutatis.solve.linear", "from mutatis import _jax_config\nfrom mutatis.numerics import linear_re", False),
         ("mutatis.library.household", "from mutatis.infer import posterior", False),
         ("mutatis.spec.model", "import sympy\nfrom . import equation", False),
+        ("mutatis.web.estimates", "from mutatis.versions.run import load_result\nfrom mutatis.infer.states import one_step_predictions", False),
+        ("mutatis.__main__", "from mutatis.web.server import serve", False),
     ],
 )
 def test_import_checker_allows(module, source, is_pkg):

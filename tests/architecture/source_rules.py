@@ -15,7 +15,8 @@ DEMOS = REPO / "demos"
 
 # Layers in dependency order: a layer may import only layers earlier in this list (and itself).
 LAYER_ORDER = ["spec", "numerics", "dist", "compile", "solve", "measure", "quantities", "infer", "versions"]
-TOP_LAYERS = {"library", "io", "__main__"}  # may import any layer; nothing imports them
+TOP_LAYERS = {"library", "io", "web", "__main__"}  # may import any layer; nothing imports them, except the command line
+ENTRY = "__main__"              # the command line: may import any layer, including the top ones
 CONFIG = "_jax_config"          # JAX settings, importable by any layer that uses JAX
 SELF_CONTAINED = {"numerics", "dist"}  # import nothing else of ours except CONFIG
 SOLVE_CONTRACT = "mutatis.solve.contract"  # the only part of solve that infer may see
@@ -81,7 +82,7 @@ def import_violations(module: str, source: str, is_package: bool) -> list[Violat
             if here == "spec" and target.split(".")[0] in JAX_PACKAGES:
                 found.append(Violation(module, f"spec must not use JAX, but imports {target}"))
             continue
-        if there == here:
+        if there == here or here == ENTRY:
             continue
         if there in TOP_LAYERS:
             found.append(Violation(module, f"nothing may import {there}, but this imports {target}"))

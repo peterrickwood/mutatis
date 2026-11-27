@@ -16,7 +16,7 @@ import jax
 import jax.numpy as jnp
 
 from mutatis import _jax_config  # noqa: F401
-from mutatis.numerics.kalman import kalman_filter
+from mutatis.numerics.kalman import Filtered, kalman_filter
 from mutatis.numerics.status import Status
 from mutatis.solve.contract import SolvedModel
 
@@ -26,8 +26,9 @@ def _guard(solved: SolvedModel, value):
     return jnp.where(ok, value, -jnp.inf)
 
 
-def kalman(solved: SolvedModel, observed, outside, start_state=None):
-    """`start_state`: the state read from the data (known exactly), or None to use the model's starting distribution."""
+def kalman_run(solved: SolvedModel, observed, outside, start_state=None) -> Filtered:
+    """The Kalman filter run through the data for a solved model: its log likelihood, and the predicted and filtered states.
+    `start_state`: the state read from the data (known exactly), or None to use the model's starting distribution."""
     form, noise = solved.linear_form(), solved.gaussian_noise()
     n = form.P.shape[0]
     if start_state is None:
@@ -38,8 +39,12 @@ def kalman(solved: SolvedModel, observed, outside, start_state=None):
     d = jnp.broadcast_to(form.d, observed.shape)
     W = form.Q @ noise.shock_cov @ form.Q.T
     H = jnp.diag(noise.error_variance)
-    result = kalman_filter(observed, m0, P0, form.P, W, form.Z, H, c, d)
-    return _guard(solved, result.log_likelihood)
+    return kalman_filter(observed, m0, P0, form.P, W, form.Z, H, c, d)
+
+
+def kalman(solved: SolvedModel, observed, outside, start_state=None):
+    """`start_state`: the state read from the data (known exactly), or None to use the model's starting distribution."""
+    return _guard(solved, kalman_run(solved, observed, outside, start_state).log_likelihood)
 
 
 def read_off(solved: SolvedModel, observed, outside, start_state):

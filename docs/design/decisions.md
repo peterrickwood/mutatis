@@ -577,3 +577,55 @@ the value is a finite stand-in (the start, with entries that are not finite set 
 (d fn / d args) dargs, is zero there. Downstream, the log-likelihood is minus infinity and its gradient not finite, which the
 samplers already treat as a rejected move. Checked: first and second derivatives of a root against the closed form; a failed
 search, alone and batched, gives a zero derivative without raising; SMC now runs on the real business cycle toy.
+
+**56. The web inspector is a top layer, `mutatis.web`, started by `python -m mutatis inspect STORE` (stage 3).** It may import
+every other layer; only the command line imports it, since the `inspect` command starts the server. The family-name rule
+applies to it. The server is the standard library's `ThreadingHTTPServer`, GET only (other methods are refused), listening on
+localhost by default; it serves plain HTML, CSS and JavaScript with no build step, and a JSON API (`/api/runs`,
+`/api/runs/<key>/{model,parameters,fit,quantities}`, `/api/compare/<a>/<b>`). Each answer is computed on first request and
+kept, once even under concurrent requests; static files are served only from `static/`; NaN becomes null in the JSON; a run's
+key is its folder name. Everything shown is computed in Python and tested there; the browser only draws it. Alternative: a
+separate entry point for the server.
+
+**57. Each run keeps its data, as `data.npz` (dates, names, values), checked against the run's fingerprint when loaded.** The
+inspector may read only the store, and `run.json` held only a fingerprint. npz rather than CSV because it is bit-exact (a CSV
+round trip turns -NaN into NaN, which breaks the fingerprint check; tested). `save_result` is split out of `run`, so any
+posterior can be stored through the store's own code (the fast tests store draws from the prior; no sampler runs in them);
+`load_data`, `load_posterior` and `problem_of` read a run back. Runs stored before this show their summaries and priors, with a
+note saying why the rest is missing. Alternative: storing the manifest's path (fails for CSV data, breaks when files move).
+
+**58. "Fitted" means the one-step-ahead prediction of each observed series** (`mutatis.infer.states.one_step_predictions`),
+from the route's estimate of the state one period earlier, with that period's shocks and measurement errors at zero: kalman,
+the filter's predicted state (`routes.kalman_run`, now shared by the likelihood, the smoother and this); read_off, the state read
+exactly from the data; sample, the state the sampled shocks imply (drawn given all the data, which the page says). Shown as
+the median and a 90% band over 200 posterior draws spaced evenly through the stored draws; draws with no usable solution are
+dropped and counted. The band is parameter (and, when sampled, state) uncertainty only, not next period's shocks; including
+those would need a particle filter whenever shocks are not normal. Alternative rejected: smoothed values, which equal the data
+for any series observed exactly.
+
+**59. Priors against posteriors, element by element.** The posterior is a 40-bin histogram of the stored draws in the
+parameter's own values. A prior that acts element by element and needs no estimated parameter is drawn as its exact density on
+a 121-point grid; any other proper prior (the even prior over rotations, inverse Wishart, a prior with estimated arguments) as a
+histogram of 4,000 draws (`draw_prior`); flat and Jeffreys priors are not drawn, with a note. The axis is the posterior's
+0.1-99.9% range plus 15% each side, widened to the prior's central 96% unless that is more than 12 times wider (then flagged),
+clipped to allowed values. Up to 16 elements get a panel each, a matrix parameter laid out as its matrix; larger ones (the
+SVAR's 64 lag coefficients) become a filterable table with a small chart per row. The summary numbers come from
+`summary.json`, as `compare` prints them.
+
+**60. Equations are written as LaTeX in Python from our own expression trees (`mutatis.spec.latex`), not with sympy.** Sympy
+reorders terms and has no notion of time shifts or expectation terms. Variables carry the period (x(-1) is x_{t-1}, E(...) is
+E_t[...]); Greek names become Greek letters; brackets appear only where the order of operations needs them (checked on 400
+random expressions by evaluating the LaTeX back). KaTeX 0.16.9 is loaded from cdnjs with integrity hashes; without it the page
+shows the specification's text.
+
+**61. The block graph is laid out in Python, layered (Sugiyama style).** Series that feed the model come first, observed and
+restriction-only series last; blocks are placed by longest path after loops are broken (Eades-Lin-Smyth); long edges pass
+through slots of their own (tested: no edge crosses a box); four barycentre sweeps order each column. One node per
+specification block (a template's instances are listed in it). The same specification always gives the same layout. Known
+limits: edge labels can overlap lines in dense graphs, and a loop arc can cross a box below its source in the same column.
+
+**62. Comparing two runs** shows the edits from `diff`; which blocks, series, restrictions, shared parameters, sets and
+expectations setting differ (found by comparing the two specifications directly); the second version's graph with the changed
+parts marked; parameters side by side with a 90%-interval chart per row; the reported quantities both runs have, overlaid; and
+both log marginal likelihoods, with the caveat about prior widths. It warns when the data differ, and says so when `diff`
+refuses because the two are not versions of one model. Reported quantities also have a tab of their own for a single run.

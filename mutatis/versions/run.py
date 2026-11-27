@@ -6,7 +6,9 @@ seed. Its folder holds:
     spec.yaml       the specification that was estimated
     run.json        the key, the edits applied, a fingerprint of the data, the settings, and the method used
     posterior.npz   the weighted draws of the unconstrained unknowns
+    data.npz        the data it was estimated on, exactly (dates, series names, values)
     summary.json    per-parameter posterior summaries, and the log marginal likelihood when defined
+    quantities.npz  the draws (or, for ranges, the bounds) of each reported quantity
 """
 
 import hashlib
@@ -194,9 +196,17 @@ def run(model: Model, dataset: Dataset, store: str | Path = "results", edits: li
     folder = Path(store) / run_key(edited, dataset, settings, seed)
     if (folder / "summary.json").exists():
         return load_result(folder)
-    key_estimate, key_summary = jax.random.split(jax.random.key(seed))
-    posterior = estimate(problem, key_estimate, method=method, **options)
+    posterior = estimate(problem, jax.random.split(jax.random.key(seed))[0], method=method, **options)
+    return save_result(folder, model, edits, dataset, problem, posterior, settings, seed, report)
+
+
+def save_result(folder: str | Path, model: Model, edits: list[Edit] | tuple[Edit, ...], dataset: Dataset, problem, posterior: Posterior, settings: dict, seed: int,
+                report: tuple[str, ...] = ()) -> Result:
+    """Store a posterior for the problem built from `model` with `edits` applied, on `dataset`: the files listed at the top."""
+    folder = Path(folder)
+    key_summary = jax.random.split(jax.random.key(seed))[1]
     summary = summarise(problem, posterior, key_summary, report)
+    edited = apply_edits(model, edits)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "spec.yaml").write_text(dump_model(edited))
     record = {"key": folder.name, "model": edited.name, "base_model": model.name, "edits": [e.to_dict() for e in edits],
@@ -204,6 +214,8 @@ def run(model: Model, dataset: Dataset, store: str | Path = "results", edits: li
               "method": posterior.method, "route": problem.route}
     (folder / "run.json").write_text(json.dumps(record, indent=2, default=str))
     np.savez(folder / "posterior.npz", particles=posterior.particles, weights=posterior.weights)
+    np.savez(folder / "data.npz", dates=np.array(dataset.dates), names=np.array(list(dataset.series)),
+             values=np.stack([np.asarray(v, dtype=float) for v in dataset.series.values()], axis=1))
     (folder / "summary.json").write_text(json.dumps(summary, indent=2))
     np.savez(folder / "quantities.npz", **_quantity_draws(problem, posterior, key_summary, report))
     return Result(folder, edited, record, summary)
@@ -226,6 +238,30 @@ def load_result(folder: str | Path) -> Result:
     folder = Path(folder)
     return Result(folder, load_model((folder / "spec.yaml").read_text()), json.loads((folder / "run.json").read_text()),
                   json.loads((folder / "summary.json").read_text()))
+
+
+def load_data(result: Result) -> Dataset | None:
+    """The data a run was estimated on, checked against its fingerprint; None for a run stored before runs kept their data."""
+    path = result.folder / "data.npz"
+    if not path.exists():
+        return None
+    with np.load(path) as stored:
+        dates, names, values = stored["dates"], stored["names"], stored["values"]
+    dataset = Dataset(tuple(str(d) for d in dates), {str(n): values[:, i].copy() for i, n in enumerate(names)})
+    if data_fingerprint(dataset) != result.run["data"]:
+        raise ValueError(f"{path} does not hold the data this run was estimated on (its fingerprint differs)")
+    return dataset
+
+
+def load_posterior(result: Result) -> Posterior:
+    """The stored draws, as the sampler returned them (no diagnostics)."""
+    with np.load(result.folder / "posterior.npz") as stored:
+        return Posterior(stored["particles"], stored["weights"], result.summary.get("log_marginal_likelihood"), result.run["method"])
+
+
+def problem_of(result: Result, dataset: Dataset):
+    """The posterior problem a run was estimated on: its specification, its data, and the route and start it used."""
+    return prepare(result.model, dataset, route=result.run["route"], start=result.run["settings"].get("start", "auto"))
 
 
 def compare(a: Result, b: Result) -> str:

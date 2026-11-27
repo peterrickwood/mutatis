@@ -40,6 +40,9 @@ benchmarks = [
 [tool.setuptools.packages.find]
 include = ["mutatis*"]
 
+[tool.setuptools.package-data]
+"mutatis.web" = ["static/*"]   # the inspector's page, script and style sheet
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Three tiers. Plain `pytest` runs only the fast tier; `pytest -m medium` or `pytest -m slow` runs the others.
