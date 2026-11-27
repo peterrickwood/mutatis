@@ -57,6 +57,7 @@ class Block:
     definitions: dict[str, str] = field(default_factory=dict)
     shocks: dict[str, Shock] = field(default_factory=dict)
     initial: dict[str, str] = field(default_factory=dict)
+    steady_state: dict[str, str] = field(default_factory=dict)   # resting values of outputs: where finding the steady state starts
     equations: tuple[str, ...] = ()
     code: str | None = None
     over: tuple[str, str] | None = None    # a template: (index name, set name), one instance per element of the set

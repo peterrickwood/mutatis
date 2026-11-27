@@ -169,6 +169,31 @@ class InverseGamma(Distribution):
         return self.scale / jax.random.gamma(key, self.a, shape)
 
 
+class InverseGammaSD(Distribution):
+    """A standard deviation whose square is inverse gamma: sigma^2 ~ InverseGamma(nu / 2, nu s^2 / 2). Density proportional to
+    sigma^(-nu-1) exp(-nu s^2 / (2 sigma^2)): the "inverse gamma" prior for shock standard deviations in Schorfheide's work
+    (IG(s, nu)) and Dynare's `inv_gamma_pdf` (type 1)."""
+
+    s: Number
+    nu: Number
+    proper = True
+
+    @property
+    def domain(self):
+        return Positive()
+
+    def log_prob(self, x):
+        safe = jnp.where(x > 0, x, 1.0)
+        half = 0.5 * self.nu
+        log_density = (jnp.log(2.0) - special.gammaln(half) + half * jnp.log(half * self.s**2) - (self.nu + 1.0) * jnp.log(safe)
+                       - half * self.s**2 / safe**2)
+        return _outside(log_density, x > 0)
+
+    def sample(self, key, sample_shape=()):
+        shape = sample_shape + jnp.broadcast_shapes(jnp.shape(self.s), jnp.shape(self.nu))
+        return jnp.sqrt(0.5 * self.nu * self.s**2 / jax.random.gamma(key, 0.5 * self.nu, shape))
+
+
 class StudentT(Distribution):
     df: Number
     loc: Number = 0.0

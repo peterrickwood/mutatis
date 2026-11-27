@@ -36,14 +36,18 @@ class Dataset:
                 raise DataError(f"series {name!r} has {len(values)} values for {len(self.dates)} dates")
 
     @classmethod
-    def read_csv(cls, path: str | Path) -> "Dataset":
+    def read_csv(cls, path: str | Path, first_date: str | None = None) -> "Dataset":
+        """A CSV file whose first column is 'date'; or, with `first_date`, one with no date column whose rows are consecutive
+        quarters from that date."""
         with open(path, newline="") as handle:
-            rows = list(csv.reader(handle))
+            rows = [row for row in csv.reader(handle) if row]
         header, body = rows[0], rows[1:]
-        if header[0] != "date":
-            raise DataError("the first column of a data file must be 'date'")
-        values = np.array([[float(v) if v.strip() not in ("", "NA", "nan", "NaN") else np.nan for v in row[1:]] for row in body])
-        return cls(tuple(row[0] for row in body), {name: values[:, i] for i, name in enumerate(header[1:])})
+        if first_date is None and header[0] != "date":
+            raise DataError("the first column of a data file must be 'date' (or give the date of the first row)")
+        start = 0 if first_date is not None else 1
+        values = np.array([[float(v) if v.strip() not in ("", "NA", "nan", "NaN") else np.nan for v in row[start:]] for row in body])
+        dates = quarters(first_date, len(body)) if first_date is not None else tuple(row[0] for row in body)
+        return cls(tuple(dates), {name.strip(): values[:, i] for i, name in enumerate(header[start:])})
 
     @classmethod
     def read_excel(cls, path: "str | Path | io.BytesIO", sheet: str, date_column: str) -> "Dataset":

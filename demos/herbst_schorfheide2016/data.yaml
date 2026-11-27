@@ -1,0 +1,10 @@
+# The data set of the book's small New Keynesian model, from the authors' book website (web.sas.upenn.edu/schorf, "Data Sets
+# Used in the Book"): dsge1_data.csv, quarterly from 1983Q1 to 2002Q4 (80 quarters; the file has no dates). Output growth
+# (quarterly, percent), inflation (annualised, percent) and the federal funds rate (percent). Not stored here: no licence is
+# stated for redistribution.
+source:
+  url: https://web.sas.upenn.edu/schorf/files/2017/05/book-data-twbpar.zip
+  sha256: "824956304bf8f7915a383842417a76a026309f687abd0fd3565172b8c14fc772"
+  member: dsge1_data.csv
+  first_date: 1983Q1
+attribution: "Herbst, E. and F. Schorfheide (2016), Bayesian Estimation of DSGE Models, Princeton University Press; book website data sets (dsge1_data.csv)."

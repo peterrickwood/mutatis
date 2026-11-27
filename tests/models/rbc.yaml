@@ -1,0 +1,58 @@
+# A basic real business cycle model (the same model as rbc.mod): log utility, fixed labour, Cobb-Douglas production, capital
+# chosen this period and used next period, technology an AR(1) in logs. Nonlinear: solved to first order around its steady state.
+model: rbc
+time: quarterly
+expectations: rational
+
+parameters:
+  delta: {prior: "beta(mean=0.025, sd=0.005)"}
+  alpha: {prior: "beta(mean=0.33, sd=0.05)"}
+  beta:  {prior: "beta(mean=0.99, sd=0.002)"}
+
+blocks:
+  technology:
+    outputs: [a]
+    parameters:
+      rho:   {prior: "beta(mean=0.9, sd=0.05)"}
+      sigma: {prior: "inverse_gamma_sd(s=0.01, nu=4)"}
+    shocks:
+      e: "normal(0, sigma)"
+    steady_state:
+      a: "1"
+    equations:
+      - "log(a) = rho * log(a(-1)) + e"
+
+  accumulation:
+    inputs: [i]
+    outputs: [k]
+    steady_state:
+      k: "(alpha / (1 / beta - 1 + delta)) ^ (1 / (1 - alpha))"
+    equations:
+      - "k = (1 - delta) * k(-1) + i"
+
+  production:
+    inputs: [a, k]
+    outputs: [y]
+    steady_state:
+      y: "k ^ alpha"
+    equations:
+      - "y = a * k(-1) ^ alpha"
+
+  resources:
+    inputs: [y, c]
+    outputs: [i]
+    steady_state:
+      i: "delta * k"
+    equations:
+      - "i = y - c"
+
+  households:
+    inputs: [a, k]
+    outputs: [c]
+    steady_state:
+      c: "y - i"
+    equations:
+      - "1 / c = beta * E(1 / c(+1) * (alpha * a(+1) * k ^ (alpha - 1) + 1 - delta))"
+
+data:
+  Y: {observes: "log(y)", error: "normal(0, 0.01)"}

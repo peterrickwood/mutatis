@@ -139,3 +139,20 @@ def test_nonlinear_equations_are_detected():
     model = e.ReplaceEquation("demand", 0, "x = rho * x(-1)^2 + e").apply(toy("forward_looking"))
     assert not compile_model(model).linear
     assert compile_model(toy("forward_looking")).linear
+
+
+@pytest.mark.parametrize("name", ["two_variable", "error_correction", "hidden_level"])
+@pytest.mark.parametrize("scheme", ["naive", "discounted(m)"])
+def test_an_expectation_rewrite_leaves_a_backward_looking_model_unchanged(name, scheme):
+    """Expectation schemes rewrite expected future values; a model without any must come out the same equation for equation."""
+    model = toy(name)
+    rewritten = e.SetExpectations(scheme).apply(model)
+    if scheme.startswith("discounted"):
+        rewritten = e.AddParameter("m", Parameter(fixed=0.9)).apply(rewritten)
+    plain, other = compile_model(model), compile_model(rewritten)
+    assert not plain.has_expectations and [q.text for q in plain.equations] == [q.text for q in other.equations]
+    rng = np.random.default_rng(0)
+    n, k, m = plain.n_variables, len(plain.shock_labels), len(plain.outside_labels)
+    args = [jnp.asarray(rng.normal(size=size)) for size in (n, n, n, k, m)]
+    params = {key: jnp.asarray(rng.uniform(0.2, 0.8, size=info.shape)) if info.shape != (2, 2) else jnp.eye(2) * 0.7 + 0.1 for key, info in plain.parameters.items()}
+    np.testing.assert_array_equal(np.asarray(plain.residual(*args, params)), np.asarray(other.residual(*args, {**params, "m": jnp.asarray(0.9)})))

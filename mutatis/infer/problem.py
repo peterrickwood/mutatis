@@ -156,14 +156,16 @@ def _initial_from_standard(solved: SolvedModel, standard):
 
 
 def choose_route(system: System, data: Arranged) -> str:
-    """The cheapest method that applies to this model and data. The choice depends only on the specification and the data."""
+    """The cheapest method that applies to this model and data. The choice depends only on the specification and the data. Every
+    solution is linear for now (a nonlinear system is solved to first order around its steady state), so the conditions on
+    linearity are on the solution, not on the equations."""
     exact = [o.error is None for o in system.observations]
     first = data.start.first if data.start else 0
     complete = not np.isnan(data.observed[first:]).any()
     gaussian = all(s.distribution.gaussian for s in system.shocks.values()) and all(o.error is None or o.error.gaussian for o in system.observations)
-    if system.linear and all(exact) and len(exact) == len(system.shock_labels) and data.start is not None and complete:
+    if all(exact) and len(exact) == len(system.shock_labels) and data.start is not None and complete:
         return "read_off"
-    if system.linear and gaussian:
+    if gaussian:
         return "kalman"
     if not any(exact):
         return "sample"

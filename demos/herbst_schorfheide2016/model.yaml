@@ -1,0 +1,68 @@
+# The small New Keynesian model of Herbst and Schorfheide (2016), "Bayesian Estimation of DSGE Models", Princeton University
+# Press, chapters 1.1 and 4: log-linearised around a balanced growth path, three shocks (technology growth, government spending,
+# monetary policy), estimated on US output growth, inflation and the federal funds rate. Written from the book's equations and
+# the authors' public code (model_solution.m, sysmat.m, prior.m); none of their files is copied here.
+model: herbst-schorfheide-nk
+time: quarterly
+expectations: rational
+
+parameters:
+  rA:     {prior: "gamma(mean=0.5, sd=0.5)"}     # steady-state real interest rate, annualised percent
+  piA:    {prior: "gamma(mean=7, sd=2)"}         # steady-state inflation, annualised percent
+  gammaQ: {prior: "normal(0.4, 0.2)"}            # steady-state output growth, quarterly percent
+
+blocks:
+  households:        # consumption Euler equation
+    inputs: [R, pi, g, z]
+    outputs: [y]
+    parameters:
+      tau: {prior: "gamma(mean=2, sd=0.5)"}      # inverse intertemporal elasticity of substitution
+    equations:
+      - "y = E(y(+1)) - (1 / tau) * (R - E(pi(+1)) - E(z(+1))) + g - E(g(+1))"
+
+  firms:             # New Keynesian Phillips curve; the discount factor is 1 / (1 + rA / 400)
+    inputs: [y, g]
+    outputs: [pi]
+    parameters:
+      kappa: {prior: "uniform(0, 1)"}            # slope of the Phillips curve
+    equations:
+      - "pi = E(pi(+1)) / (1 + rA / 400) + kappa * (y - g)"
+
+  policy:            # interest-rate rule with smoothing
+    inputs: [y, pi, g]
+    outputs: [R]
+    parameters:
+      psi1:    {prior: "gamma(mean=1.5, sd=0.25)"}
+      psi2:    {prior: "gamma(mean=0.5, sd=0.25)"}
+      rho_R:   {prior: "uniform(0, 1)"}
+      sigma_R: {prior: "inverse_gamma_sd(s=0.4, nu=4)"}
+    shocks:
+      eR: "normal(0, sigma_R)"
+    equations:
+      - "R = rho_R * R(-1) + (1 - rho_R) * (psi1 * pi + psi2 * (y - g)) + eR"
+
+  spending:          # government spending
+    outputs: [g]
+    parameters:
+      rho_g:   {prior: "uniform(0, 1)"}
+      sigma_g: {prior: "inverse_gamma_sd(s=1, nu=4)"}
+    shocks:
+      eg: "normal(0, sigma_g)"
+    equations:
+      - "g = rho_g * g(-1) + eg"
+
+  technology:        # growth rate of technology
+    outputs: [z]
+    parameters:
+      rho_z:   {prior: "uniform(0, 1)"}
+      sigma_z: {prior: "inverse_gamma_sd(s=0.5, nu=4)"}
+    shocks:
+      ez: "normal(0, sigma_z)"
+    equations:
+      - "z = rho_z * z(-1) + ez"
+
+# Measurement errors have fixed standard deviations, a fifth of each series' sample standard deviation, as in the authors' code.
+data:
+  ygr:  {observes: "gammaQ + y - y(-1) + z", error: "normal(0, 0.1159846)"}   # quarterly output growth, percent
+  infl: {observes: "piA + 4 * pi", error: "normal(0, 0.2941664)"}             # annualised inflation, percent
+  int:  {observes: "piA + rA + 4 * gammaQ + 4 * R", error: "normal(0, 0.4475874)"}  # federal funds rate, percent

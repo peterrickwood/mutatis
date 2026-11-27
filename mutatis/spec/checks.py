@@ -141,6 +141,14 @@ def _block(name: str, block: Block, model: Model, produced, fed) -> list[Finding
         findings += _distribution(f"{where}.shocks.{name}", shock.distribution)
     for variable, text in block.initial.items():
         findings += _distribution(f"{where}.initial.{variable}", text)
+    outputs = {port(o)[0] for o in block.outputs}
+    for variable, text in block.steady_state.items():
+        if variable not in outputs:
+            findings.append(Finding(f"{where}.steady_state.{variable}", f"{variable!r} is not an output of this block"))
+        try:
+            parse_expression(text)
+        except ParseError as error:
+            findings.append(Finding(f"{where}.steady_state.{variable}", str(error)))
     if block.over is not None:
         set_elements = {str(x) for x in model.sets.get(block.over[1], ())}
         for element in block.overrides:

@@ -7,9 +7,14 @@ The system's residual is linear, so its derivatives at zero give it exactly:
 (x variables, e shocks, z outside variables). With expectation terms the forward-looking solve applies; without, the backward
 one. The constant f moves the resting point: kappa solves (A P + B + A) kappa = -f, because E[x(t+1)] = kappa + P x(t).
 
-Two limits for now: the system must be linear (nonlinear systems need a resting point and a linear approximation around it,
-which comes in a later stage), and a model with expectation terms may not have outside variables, because the solution would
-then depend on what people expect the outside variables to do.
+A nonlinear system is solved to first order around its steady state: the point where every period's values are equal and the
+shocks are zero, found by Newton's method (`mutatis.numerics.rootfind`) from the `steady_state` values in the specification.
+The same formulas then apply to the derivatives taken there, with the constant f - (A + B + C) x_ss, so the solution in levels
+rests at the steady state. If the steady state is not found, the status says so. Derivatives with respect to the parameters
+pass through the steady state by the implicit function theorem.
+
+One limit for now: a model with expectation terms, or a nonlinear one, may not have outside variables, because the solution
+would then depend on what people expect them to do (and on where they rest).
 """
 
 import equinox as eqx
@@ -23,6 +28,7 @@ from mutatis.dist import MultivariateNormal
 from mutatis.numerics.factor import cholesky_with_jitter
 from mutatis.numerics.kalman import stationary_covariance
 from mutatis.numerics.linear_re import solve_backward, solve_forward_looking
+from mutatis.numerics.rootfind import find_root
 from mutatis.numerics.status import Status
 from mutatis.solve.contract import GaussianNoise, LinearForm, SolvedModel
 
@@ -138,13 +144,27 @@ def shock_covariance(shock_dists, positions, shapes):
     return cov
 
 
-def solve_linear(system: System, params: dict) -> LinearSolved:
-    if not system.linear:
-        raise SolveError("this system is not linear; nonlinear systems are not supported yet")
+def steady_state(system: System, params: dict) -> tuple[jax.Array, jax.Array]:
+    """The steady state of a system (values equal in every period, shocks zero), from the specification's `steady_state` values,
+    and the status of the search."""
     n, k, m = system.n_variables, len(system.shock_labels), len(system.outside_labels)
-    zeros = (jnp.zeros(n), jnp.zeros(n), jnp.zeros(n), jnp.zeros(k), jnp.zeros(m))
-    A, B, C, D, G = jax.jacfwd(system.residual, argnums=(0, 1, 2, 3, 4))(*zeros, params)
-    f = system.residual(*zeros, params)
+    if m:
+        raise SolveError("a nonlinear model cannot have outside variables yet: where they rest would set its steady state")
+    return find_root(lambda x, p: system.residual(x, x, x, jnp.zeros(k), jnp.zeros(m), p), system.steady_guess(params), params)
+
+
+def solve_linear(system: System, params: dict) -> LinearSolved:
+    """The solution of a linear system, or the first-order solution of a nonlinear one around its steady state."""
+    n, k, m = system.n_variables, len(system.shock_labels), len(system.outside_labels)
+    if system.linear:
+        point, found = jnp.zeros(n), Status.OK
+    else:
+        if not system.steady_state:
+            raise SolveError("this system is not linear: give the `steady_state` values of its blocks' outputs, where finding the steady state starts")
+        point, found = steady_state(system, params)
+    expansion = (point, point, point, jnp.zeros(k), jnp.zeros(m))
+    A, B, C, D, G = jax.jacfwd(system.residual, argnums=(0, 1, 2, 3, 4))(*expansion, params)
+    f = system.residual(*expansion, params) - (A + B + C) @ point
     if system.has_expectations:
         if m:
             raise SolveError("a model with expectation terms cannot have outside variables yet: give each one a block of its own")
@@ -155,8 +175,9 @@ def solve_linear(system: System, params: dict) -> LinearSolved:
     else:
         P, Q, status = solve_backward(B, C, jnp.concatenate([D, G, f[:, None]], axis=1))
         Q, R, kappa = Q[:, :k], Q[:, k:k + m], Q[:, -1]
-    d = system.observe(jnp.zeros(n), params)
-    Z = jax.jacfwd(system.observe)(jnp.zeros(n), params) if system.observations else jnp.zeros((0, n))
+    Z = jax.jacfwd(system.observe)(point, params) if system.observations else jnp.zeros((0, n))
+    d = system.observe(point, params) - Z @ point
+    status = jnp.where(found == Status.OK, status, found)
 
     shock_dists, positions, shapes = [], [], []
     for info in system.shocks.values():

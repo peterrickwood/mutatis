@@ -100,6 +100,20 @@ class System:
     presample: int                   # periods of data before the first one explained, when starting from the data itself
     model_variables: tuple[str, ...] = field(default=())
     restrictions: tuple[tuple[str, str, str], ...] = field(default=())   # (name, quantity, requirement), as in the specification
+    steady_state: tuple[tuple[str, Expr], ...] = field(default=())         # (variable, its resting value), in the order given
+
+    def steady_guess(self, params) -> jnp.ndarray:
+        """Where finding the steady state starts: each `steady_state` entry evaluated in the order given (an entry may use the
+        values of the entries before it); every other variable, zero; lag copies, the value of what they copy."""
+        x = jnp.zeros(self.n_variables)
+        for key, expr in self.steady_state:
+            positions = self.layout.variables[key].positions
+            value = evaluate(expr, self.layout, Values(None, x, None, None, None, params))
+            x = x.at[positions.reshape(-1)].set(jnp.broadcast_to(value, positions.shape).reshape(-1))
+        for key, aux in self.auxiliary.items():
+            if aux.base in self.layout.variables:
+                x = x.at[self.layout.variables[key].positions.reshape(-1)].set(x[self.layout.variables[aux.base].positions.reshape(-1)])
+        return x
 
     def residual(self, lead, now, lag, shocks, outside, params):
         values = Values(lead, now, lag, shocks, outside, params)
@@ -129,7 +143,7 @@ def compile_model(model: Model) -> System:
         raise CompileError(f"the discounting factor {factor!r} must be a model-level parameter")
 
     reducer = LagReducer()
-    equations, shocks, initial = [], {}, {}
+    equations, shocks, initial, steady = [], {}, {}, []
     for name, block in model.blocks.items():
         for label, instance, binding in instances(name, block, model):
             element = binding.get(block.over[0]) if block.over else None
@@ -155,6 +169,8 @@ def compile_model(model: Model) -> System:
             for variable, text in instance.initial.items():
                 shape = tuple(len(sets[a]) for a in variable_axes[variable])
                 initial[variable] = parse_distribution(text, parameter_keys, shape)
+            for variable, text in instance.steady_state.items():
+                steady.append((variable, resolve(unroll(substitute(parse_expression(text), bindings), sets), scope)))
 
     observations, auxiliary_series = [], []
     for series, link in model.data.items():
@@ -188,7 +204,7 @@ def compile_model(model: Model) -> System:
                     initial, dict(reducer.auxiliary), any(_has_expectation(e.expr) for e in equations),
                     all(_degree(e.expr) <= 1 for e in equations) and all(_degree(o.expr) <= 1 for o in observations),
                     _presample(reducer.auxiliary), model_variables,
-                    tuple((name, r.quantity, r.require) for name, r in model.restrictions.items()))
+                    tuple((name, r.quantity, r.require) for name, r in model.restrictions.items()), tuple(steady))
     _count(system)
     return system
 

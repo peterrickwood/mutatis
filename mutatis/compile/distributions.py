@@ -12,7 +12,7 @@ import jax.numpy as jnp
 from mutatis import _jax_config  # noqa: F401
 from mutatis.compile.expand import CompileError, Scope, resolve
 from mutatis.compile.symbols import PARAMETER, Ref
-from mutatis.dist import (Beta, Flat, Gamma, HalfNormal, InverseGamma, InverseWishart, MultivariateNormal, Normal, StudentT, Uniform,
+from mutatis.dist import (Beta, Flat, Gamma, HalfNormal, InverseGamma, InverseGammaSD, InverseWishart, MultivariateNormal, Normal, StudentT, Uniform,
                           UniformOrthogonal)
 from mutatis.dist.distributions import JeffreysCovariance
 from mutatis.dist.domains import Interval, Orthogonal, Positive, PositiveDefinite, Real
@@ -28,6 +28,7 @@ FAMILIES = {
     "gamma": (("a", "rate"), Positive(), False),
     "beta": (("a", "b"), Interval(0.0, 1.0), False),
     "inverse_gamma": (("a", "scale"), Positive(), False),
+    "inverse_gamma_sd": (("s", "nu"), Positive(), False),
     "student_t": (("df", "loc", "scale"), Real(), False),
     "uniform": (("low", "high"), None, False),
     "multivariate_normal": (("mean", "cov"), Real(), True),
@@ -68,6 +69,8 @@ class DistributionSpec:
                 return cls.from_mean_sd(args["mean"], args["sd"])
             names = FAMILIES[f][0]
             return cls(args[names[0]], args[names[1]])
+        if f == "inverse_gamma_sd":
+            return InverseGammaSD(args["s"], args["nu"])
         if f == "student_t":
             return StudentT(args["df"], args.get("loc", 0.0), args.get("scale", 1.0))
         if f == "uniform":

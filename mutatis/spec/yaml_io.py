@@ -57,7 +57,7 @@ def _text(value):
 
 
 def block_from_dict(where: str, value: dict) -> Block:
-    _check_keys(where, value, {"inputs", "outputs", "parameters", "definitions", "shocks", "initial", "equations", "code", "overrides"})
+    _check_keys(where, value, {"inputs", "outputs", "parameters", "definitions", "shocks", "initial", "steady_state", "equations", "code", "overrides"})
     shocks = {}
     for key, distribution in (value.get("shocks") or {}).items():
         match = _SHOCK_KEY.match(str(key))
@@ -71,6 +71,7 @@ def block_from_dict(where: str, value: dict) -> Block:
                      parameters={k: parameter_from_dict(f"{where}.parameters.{k}", v) for k, v in (value.get("parameters") or {}).items()},
                      definitions={k: str(v) for k, v in (value.get("definitions") or {}).items()}, shocks=shocks,
                      initial={k: str(v) for k, v in (value.get("initial") or {}).items()},
+                     steady_state={k: str(v) for k, v in (value.get("steady_state") or {}).items()},
                      equations=tuple(str(e) for e in (value.get("equations") or ())), code=value.get("code"), overrides=overrides)
     except ValueError as error:
         raise SpecError(f"{where}: {error}") from None
@@ -145,6 +146,8 @@ def block_to_dict(block: Block) -> dict:
         out["shocks"] = {(f"{k}[{', '.join(s.shape)}]" if s.shape else k): s.distribution for k, s in block.shocks.items()}
     if block.initial:
         out["initial"] = dict(block.initial)
+    if block.steady_state:
+        out["steady_state"] = dict(block.steady_state)
     if block.equations:
         out["equations"] = list(block.equations)
     if block.code:

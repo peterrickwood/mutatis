@@ -424,3 +424,43 @@ always had not been benchmarked together; the short suite is rerun with it, agai
 normal (`reference="fitted"`). Alternatives: decision 42's rule with divergent trajectories also switching the ladder on
 (not tried; it would switch it on for the sampled-shocks model too, where the ladder takes about 4 times as long); a ladder
 always without the search (decision 41).
+
+**49. Stage 2's textbook model is Herbst and Schorfheide's small New Keynesian model (agreed in discussion 2026-11-27).**
+`demos/herbst_schorfheide2016`: the model of "Bayesian Estimation of DSGE Models" (Princeton University Press, 2016), chapters
+1.1 and 4, written from the book's equations and the authors' public code (none of their files is copied), with their data
+downloaded from the book website by the manifest (no licence for redistribution is stated). Checked against the authors' own
+code, run in Octave 10.3: the log-likelihood and the log prior density at two parameter points agree to 1e-12
+(`reference/likelihood.csv`). The model is also written in Dynare's language (`model.mod`); Dynare 6.5's first-order solution
+of it at the authors' posterior mode agrees with ours, all 56 coefficients to 1e-10 (`reference/dynare_solution.csv`). The
+posterior from the default sampler agrees with the authors' random-walk Metropolis-Hastings run, 200,000 draws in Octave
+(`reference/posterior.csv`): every parameter's mean and standard deviation within 5 standard errors of the difference (the
+largest, 1.2 for a mean and 2.7 for a standard deviation), in 35 minutes on 4 processes. Dynare 6.5 runs here from its source
+release in a separate conda environment (Octave 10.3 with its statistics package; the preprocessor built from the same
+release, since conda-forge's writes code for a different Dynare version; compiled helpers not built, Dynare's own Octave
+fallbacks standing in, enough for first-order work). Nothing of Dynare is in the repository.
+
+**50. Nonlinear models are solved to first order around their steady state, found from values the specification gives.** A
+block may state `steady_state` values for its outputs: expressions in parameters and in the values given before them, where
+Newton's method starts (`mutatis.numerics.rootfind`, derivatives through the implicit function theorem). The linear solve then
+takes its derivatives at that point instead of at zero, with the constant f - (A + B + C) x_ss, so linear models are unchanged
+and a nonlinear model's solution rests at its steady state; observation equations are linearised at the same point. Every
+solution is therefore linear for now, and the choice of route no longer asks whether the equations are. Checked: a growth model
+k = (1 - delta) k(-1) + s k(-1)^alpha + e against its closed form (steady state, persistence, linearised log observation, and
+the derivative of the steady state with respect to s); a real business cycle model whose Euler equation takes the expectation
+of a nonlinear expression, against Dynare 6.5 (steady state and solution, 20 values to 1e-9). Not yet: `steady_state` in
+template blocks; nonlinear models with outside variables.
+
+**51. Dynare files are imported through Dynare's own preprocessor (`mutatis.io.dynare`).** The preprocessor (GPL, a separate
+program found from $MUTATIS_DYNARE_PREPROCESSOR or the path) writes the parsed file as JSON, which becomes a specification: one
+block holding every equation (a Dynare file does not say which equation determines which variable); leads x(1) as E(x(+1)),
+the same to first order; parameters fixed at the file's values or given its `estimated_params` priors (beta, gamma, normal,
+uniform, and the inverse gamma for standard deviations, whose (s, nu) are found from Dynare's mean and standard deviation);
+`steady_state_model` or `initval` as steady-state values; `varobs` as data series of the same names, with the measurement
+errors the shocks block declares. Checked: the imported real business cycle model solves as Dynare does and as the
+hand-written specification does (to 1e-12); the imported Herbst and Schorfheide model gives the authors' log-likelihood (to
+1e-12) and log prior density (to 1e-8, through Dynare's mean-and-sd form of the inverse gamma). Not yet: leads beyond one
+period, auxiliary variables, shocks given by variances or correlations, shifted priors.
+
+**52. Two smaller additions for stage 2.** The prior family `inverse_gamma_sd(s, nu)`, a standard deviation whose square is
+inverse gamma (Schorfheide's IG(s, nu), Dynare's `inv_gamma_pdf`), tested against SciPy and the authors' formula; and data
+manifests for CSV files with no date column (`first_date`: rows are consecutive quarters from it).

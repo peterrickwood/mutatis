@@ -8,6 +8,7 @@ A manifest is a small YAML file:
       member: data.xlsx          # the file inside a zip; omit for a plain file
       sheet: Data                # for a spreadsheet; omit for CSV
       date_column: Date
+      first_date: 1983Q1         # for a CSV file with no date column: its rows are consecutive quarters from this one
     sample: {first: 1984Q1, last: 2019Q4}
     attribution: who made the data, and on what terms
 
@@ -63,6 +64,6 @@ def load_manifest(path: str | Path) -> Dataset:
     else:
         scratch = cache_folder() / (hashlib.sha256(raw).hexdigest() + ".csv")
         scratch.write_bytes(raw)
-        dataset = Dataset.read_csv(scratch)
+        dataset = Dataset.read_csv(scratch, source.get("first_date"))
     sample = manifest.get("sample", {})
     return dataset.between(sample.get("first"), sample.get("last"))

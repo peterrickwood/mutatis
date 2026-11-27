@@ -11,11 +11,28 @@ import pytest
 import scipy.stats as ss
 
 from tests.helpers import assert_covariance_matches, assert_mean_matches
-from mutatis.dist import (Beta, Flat, Gamma, HalfNormal, InverseGamma, InverseWishart, MultivariateNormal, Normal, PositiveDefinite, StudentT, Uniform,
+from mutatis.dist import (Beta, Flat, Gamma, HalfNormal, InverseGamma, InverseGammaSD, InverseWishart, MultivariateNormal, Normal, PositiveDefinite, StudentT, Uniform,
                           UniformOrthogonal)
 
 N_DRAWS = 20_000
 POINTS = jnp.array([0.05, 0.3, 0.9, 1.7, 4.0])
+
+class _SqrtOfInverseGamma:
+    """The standard deviation sigma when sigma^2 ~ InverseGamma(a, scale), built from SciPy's inverse gamma."""
+
+    def __init__(self, a, scale):
+        self.a, self.scale = a, scale
+
+    def logpdf(self, x):
+        return np.log(2 * x) + ss.invgamma(self.a, scale=self.scale).logpdf(x**2)
+
+    def mean(self):
+        from scipy.special import gammaln
+        return np.sqrt(self.scale) * np.exp(gammaln(self.a - 0.5) - gammaln(self.a))
+
+    def support(self):
+        return (0.0, np.inf)
+
 
 # (mutatis distribution, the same distribution in SciPy)
 SCALAR_CASES = [
@@ -24,6 +41,7 @@ SCALAR_CASES = [
     (Gamma(2.5, 1.5), ss.gamma(2.5, scale=1 / 1.5)),
     (Beta(2.0, 5.0), ss.beta(2.0, 5.0)),
     (InverseGamma(3.0, 2.0), ss.invgamma(3.0, scale=2.0)),
+    (InverseGammaSD(0.5, 4.0), _SqrtOfInverseGamma(2.0, 4.0 * 0.5**2 / 2)),       # s = 0.5, nu = 4
     (StudentT(4.0, -0.5, 2.0), ss.t(4.0, -0.5, 2.0)),
     (Uniform(-1.0, 2.5), ss.uniform(-1.0, 3.5)),
 ]
@@ -121,3 +139,12 @@ def test_standard_form_of_a_multivariate_normal():
     draws = dist.from_standard(dist.standard().sample(jax.random.key(4), (N_DRAWS,)))
     assert_mean_matches(draws, np.asarray(mean))
     assert_covariance_matches(draws, mean, cov)
+
+
+def test_inverse_gamma_for_a_standard_deviation_is_schorfheides():
+    """The prior on shock standard deviations in Herbst and Schorfheide's code (prior.m, lnpdfig with a = s, b = nu)."""
+    from scipy.special import gammaln
+    s_, nu = 0.4, 4.0
+    x = np.array([0.1, 0.3, 0.8, 2.0])
+    theirs = np.log(2) - gammaln(nu / 2) + (nu / 2) * np.log(nu * s_**2 / 2) - ((nu + 1) / 2) * np.log(x**2) - nu * s_**2 / (2 * x**2)
+    np.testing.assert_allclose(np.asarray(InverseGammaSD(s_, nu).log_prob(jnp.asarray(x))), theirs, rtol=1e-12)
