@@ -273,3 +273,31 @@ missing, starting from the stationary covariance. Required in advance: every fil
   similar (0.4 to 1.9 s).
 Revisit if gradient time at DSGE size becomes the limit. Alternative: the standard form, 1.5 times faster, with covariances
 accurate relative to the predicted covariance rather than to themselves.
+
+## General sampler (2026-11-26)
+
+**40. The evidence from a tempering ladder uses a geometric bridge between neighbouring rungs, and standard errors come from
+effective sample sizes, not from the spread of replicas.** First version: the average of the one-sided "forward" and
+"backward" stepping-stone estimates. On a 5-unknown normal target with exact draws at every rung it was 0.098 below the exact
+log evidence with a reported standard error of 0.021. Per pair of rungs, the forward estimates summed to an error of -0.004 and
+the backward ones to -0.162. Cause: the backward average, of exp(-dbeta x ell) over the hotter rung's draws, has infinite
+variance unless that rung's beta minus dbeta stays above about -1/(n x prior variance) (here -2e-4), which a ladder spaced
+to even out its exchanges breaks at most pairs. The geometric bridge (exp(+dbeta/2 x ell) over the cooler rung, exp(-dbeta/2 x
+ell) over the hotter) has finite variance on both sides whatever the spacing, and both sides see only places with positive
+likelihood, so the reference end needs no special case. Over 8 seeds its errors were -0.059 to +0.060. Second finding: a
+standard error from the spread of 4 replicas has 3 degrees of freedom and is itself too noisy (one seed gave 3.5 standard
+errors by chance); the delta method with each rung's effective sample size uses all the draws. Bridge sampling likewise uses
+Fruhwirth-Schnatter's (2004) error approximation. Alternative: forward-only stepping stones (Xie and others, 2011), which
+also has finite variance here but uses one side of each pair.
+
+**41. The general sampler: step rule x tempering ladder x replicas and starts x checks (agreed in discussion 2026-11-26).**
+`mutatis.infer.mcmc.mcmc`. Defaults, chosen to work rather than to be fast: NUTS steps; a parallel-tempering ladder whose
+spacing and number of rungs are set during warm-up from the communication barrier (non-reversible exchanges, Syed and others
+2022), ending at the prior when it is proper and otherwise at a normal distribution fitted by Pathfinder (variance inflated
+fourfold); 4 replicas started from Pathfinder draws; 1,000 warm-up and 1,000 recorded scans. Checks: rank-normalised R-hat
+above 1.01, bulk effective sample size below 100 per replica, any divergent trajectory at the posterior rung, fewer than 2
+round trips per replica, fewer rungs than twice the barrier; any finding sets `converged` False. NUTS as usually run is the
+named setting `nuts` (one rung, prior starts), replacing the separate NUTS module. The evidence is a separate, optional step
+(`mutatis.infer.evidence`, decision 40). SMC is kept, for comparison. Not yet changed: `estimate()`'s automatic choice
+(exact regression, NUTS for sampled shocks, otherwise SMC), pending the benchmark. Alternatives: SMC with better moves; NUTS
+alone, which cannot weigh separated peaks.

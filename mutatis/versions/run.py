@@ -20,12 +20,9 @@ import jax.numpy as jnp
 import numpy as np
 
 from mutatis import _jax_config  # noqa: F401
-from mutatis.infer.estimate import estimate
+from mutatis.infer.estimate import SAMPLERS, choose_method, estimate
 from mutatis.infer.intervals import bootstrap_standard_errors, robust_credible_interval, shortest_centred_interval
 from mutatis.infer.posterior import Posterior
-from mutatis.infer.regression import regression_posterior
-from mutatis.infer.nuts import nuts
-from mutatis.infer.smc import smc
 from mutatis.measure.data import Dataset
 from mutatis.spec.diff import diff
 from mutatis.spec.edits import Edit, apply_edits
@@ -61,7 +58,7 @@ def run_key(model: Model, dataset: Dataset, settings: dict, seed: int) -> str:
 def summarise(problem, posterior: Posterior, key, report=()) -> dict:
     summary = _summarise_parameters(problem, posterior, key)
     summary["quantities"] = _summarise_quantities(problem, posterior, key, report)
-    for name in ("plausibility", "max_rhat", "divergences"):
+    for name in ("plausibility", "max_rhat", "min_ess", "divergences", "round_trips", "converged", "findings"):
         if name in posterior.diagnostics:
             summary[name] = posterior.diagnostics[name]
     return summary
@@ -188,9 +185,8 @@ def run(model: Model, dataset: Dataset, store: str | Path = "results", edits: li
         method: str = "auto", report: tuple[str, ...] = (), **options) -> Result:
     edited = apply_edits(model, edits)
     problem = prepare(edited, dataset, route=route)
-    if method == "auto":
-        method = "exact_regression" if not problem.proper else "nuts" if problem.route == "sample" else "smc"
-    sampler = {"smc": smc, "nuts": nuts, "exact_regression": regression_posterior}[method]
+    method = choose_method(problem) if method == "auto" else method
+    sampler = SAMPLERS[method]
     defaults = {k: v.default for k, v in inspect.signature(sampler).parameters.items() if v.default is not inspect.Parameter.empty}
     if method == "exact_regression":
         options = {**options, "report": tuple(report)}  # ranges are computed draw by draw, so the sampler needs the report

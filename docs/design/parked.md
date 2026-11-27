@@ -12,11 +12,11 @@ Questions raised in discussion and set aside, to come back to. When one is settl
    fallback to counting roots for the failing draws only. Suggested: the first. Source: the numerical audit, decisions 34
    and 35.
 
-2. **SMC with more than about 50 unknowns (discussion started 2026-11-26).** Decision 38 has the evidence. Meanwhile,
-   problems with sampled shocks use NUTS (decision 26), which gives no marginal likelihood. Options: a full-covariance mass
-   matrix from the particles with random trajectory lengths and more moves; shrinking the per-unknown scales towards a
-   common one; a number of moves set by a measure of mixing; bringing the data in one period at a time for sampled shocks;
-   keeping NUTS above about 50 unknowns.
+2. **Which sampler `estimate()` chooses automatically (raised 2026-11-26).** Decided in discussion: the default is the
+   general sampler (decision 41: NUTS steps, a tempering ladder, 4 replicas, checks), with the evidence as a separate,
+   optional step, and SMC kept for comparison. Open: switching `estimate()`'s automatic choice from SMC and NUTS to it, once
+   the sampler benchmark (`python -m benchmarks.samplers`) has been reviewed. SMC's failures with many unknowns are in
+   decision 38.
 
 3. **Range acceptance criterion for Read (2022) (decision 32, raised 2026-11-26).** Stage 1's test requires our range
    bounds to be exact rather than to match Read's published numbers, because his are not always exact (decision 28). This

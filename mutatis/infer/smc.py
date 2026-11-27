@@ -59,8 +59,10 @@ def smc(problem, key, n_particles: int = 2000, n_mcmc_steps: int = 5, n_leapfrog
         acceptance.append(rate)
     else:
         raise SMCError(f"the temperature reached only {float(state.tempering_param):.3g} after {max_steps} steps")
+    stages = len(temperatures) - 1  # each: a gradient at every particle to start its moves, then the moves' leapfrog steps
     return Posterior(np.asarray(state.particles), np.asarray(state.weights), log_evidence, "smc",
-                     {"temperatures": tuple(temperatures), "acceptance": tuple(acceptance)})
+                     {"temperatures": tuple(temperatures), "acceptance": tuple(acceptance),
+                      "gradient_evaluations": stages * n_particles * (1 + n_mcmc_steps * n_leapfrog)})
 
 
 def _weighted_variance(particles, weights):

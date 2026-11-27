@@ -15,7 +15,8 @@ data set are not independent), failing below p = 0.001 divided by the number of 
 deterministic.
 
 Tiers: SMC and NUTS are medium (about 2 minutes together); the exact regression formula is slow (about 11 minutes, because it
-builds and compiles a new problem for each of its 150 data sets).
+builds and compiles a new problem for each of its 150 data sets), and so is the general sampler at its default settings (a
+tempering ladder for each of 100 data sets).
 """
 
 import jax
@@ -24,7 +25,7 @@ import numpy as np
 import pytest
 import scipy.stats as ss
 
-from mutatis.infer.nuts import nuts
+from mutatis.infer.mcmc import mcmc, nuts
 from mutatis.infer.problem import build_problem
 from mutatis.infer.regression import regression_posterior
 from mutatis.infer.smc import smc
@@ -82,6 +83,16 @@ def test_nuts_is_calibrated():
         posterior = nuts(MeanAndScale(y), jax.random.key(replication), n_chains=1, n_warmup=300, n_draws=400)
         positions.append([np.mean(posterior.particles[:, j] < truth[j]) for j in range(2)])
     _uniform(positions, "NUTS")
+
+
+@pytest.mark.slow
+def test_default_mcmc_is_calibrated():
+    rng, positions = np.random.default_rng(2), []
+    for replication in range(100):
+        truth, y = _simulate(rng)
+        posterior = mcmc(MeanAndScale(y), jax.random.key(replication), n_warmup=300, n_draws=400)
+        positions.append([np.mean(posterior.particles[:, j] < truth[j]) for j in range(2)])
+    _uniform(positions, "Default MCMC (tempering ladder)")
 
 
 @pytest.mark.slow
