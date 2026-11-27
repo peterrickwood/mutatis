@@ -26,8 +26,14 @@ Questions raised in discussion and set aside, to come back to. When one is settl
      raise the chance that the checks see it, not fix it.
    - The ladder's checks raised false alarms on 8 of its 26 accurate runs: too few round trips on long ladders, and
      divergent trajectories on the banana and hidden-level targets.
-   - Round trips fall well below the formula for exact moves (0 against at most about 46 on the 49-rung ladder); being
-     investigated separately, since it may be a defect that also lengthens ladders.
+   - Round trips fall well below the formula for exact moves (0 against about 46 on the 49-rung ladder). Investigated
+     2026-11-27; not a defect. Mainly, trips are counted only within the 1,000 sampling scans, from a fresh start, and on a
+     49-rung ladder one state needs about 4,200 scans per trip on average: with exact moves the same ladder also gives 0
+     and 2 trips over 1,000 draws, and 85 to 87% of the formula over 20,000. Secondly, NUTS moves do not fully refresh a
+     rung's state between exchanges (lag-1 autocorrelation of the log likelihood about 0.27, against 0 for exact moves),
+     which gives 67 to 83% of the formula's trips over 5,000 draws at 2 and 10 unknowns, against 95 to 97% for exact
+     moves. So the round-trip check asks for more trips than a long ladder can show in 1,000 draws, even when it works as
+     the theory says; what the check should compare against is for the design session.
 
 3. **Range acceptance criterion for Read (2022) (decision 32, raised 2026-11-26).** Stage 1's test requires our range
    bounds to be exact rather than to match Read's published numbers, because his are not always exact (decision 28). This
