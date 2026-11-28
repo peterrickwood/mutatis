@@ -1,0 +1,12 @@
+# The data of Gibbs, Hambur and Nodari (2018), "DSGE Reno: Adding a Housing Block to a Small Open Economy Model", RBA Research
+# Discussion Paper 2018-04: the sheet their Dynare estimation reads. Their stored estimation used 99 quarters, 1992Q2 to 2016Q4
+# (Dynare's options_.nobs = 99), with every series demeaned over them (prefilter=1).
+source:
+  url: https://www.rba.gov.au/publications/rdp/2018/2018-04/rdp-2018-04-supplementary-information.zip
+  sha256: "31ec3322b868b0afe41528226894ce299c61f39b8a1e3f70a3704ca885abff64"
+  member: Domestic Sector/FourSectorData.xlsx
+  sheet: DynareInput
+  date_column: ""
+sample: {first: 1992Q2, last: 2016Q4}
+demean: true
+attribution: Reserve Bank of Australia, supplementary information for RDP 2018-04 (the read-me says "All files are available for external release").

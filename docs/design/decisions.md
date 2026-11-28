@@ -548,3 +548,22 @@ falls short on none (largest gap 4.5e-11 of the width). Tests: two random cases 
 alone falls short by more than 1e-3 now match the exact reduction to 1e-8. Alternatives, rejected in discussion: an exact rule
 for proxy restrictions (specific to one kind of restriction), and accepting bounds that may be too narrow (they understate
 uncertainty without saying so). Parked item 4 reviews the optimisation methods together.
+
+**54. Dynare files are imported as published, at full size; the housing model's likelihood equals Dynare's (stage 4, first
+part).** The importer (decision 51) now handles what Gibbs, Hambur and Nodari's (2018) code uses: files included with
+`@#include` (read from the model file's folder) and macro variables; model-local variables (`#`) as the block's definitions;
+estimated shock standard deviations as parameters named `stderr_<shock>` with their priors; parameter values worked out
+statement by statement in the file's order, as Dynare does, with values the file computes in MATLAB code (here 31, from a
+steady-state solve) supplied by the caller, for example from the authors' stored results (`stored_parameter_values`); a
+declared shock that no equation uses left out (as Dynare's `nostrict` does); `initval` entries for shocks ignored; and the
+model read as it stands at the `estimation` statement (this file's later calibration checks reset two shock sizes).
+`import_dynare_source` imports a model from a published archive described by a small YAML file; the archive is downloaded into
+the data cache and nothing of it enters the repository. Data manifests gain an unnamed date column and `demean: true`
+(Dynare's `prefilter=1`). Checked (`tests/test_stage4_gibbs_hambur_nodari2018.py`, slow tier): 150 variables, as in Dynare (its
+7 auxiliary variables come from our own lag handling); every fixed value equals the stored `M_.params`; at the stored posterior
+mode the log-likelihood (-4909.6624259464) and the log prior density equal Dynare 6.5's to 8e-11 and 1e-10. Dynare was run with
+the stored parameter values (`demos/gibbs_hambur_nodari2018/reference/README.md`): its own solve of the steady state, which is
+singular in one direction, moves the log-likelihood by 1.4e-6. A small file with all these features solves as the same model
+written by hand, to 1e-14 (fast tier). The stored run used 99 quarters, 1992Q2 to 2016Q4, not the paper's 1992Q1 start. Not
+yet: the steady state and calibration as part of a specification (the values are taken as computed); the model written as
+blocks, and the step from the base model; estimation at this size (parked item 3).

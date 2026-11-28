@@ -51,11 +51,12 @@ class Dataset:
 
     @classmethod
     def read_excel(cls, path: "str | Path | io.BytesIO", sheet: str, date_column: str) -> "Dataset":
-        """A sheet with one row per quarter: a date column (dates or text such as 1984Q1), then one column per series."""
+        """A sheet with one row per quarter: a date column (dates or text such as 1984Q1), then one column per series. A column
+        with an empty heading is named "" (so `date_column=""` finds an unnamed date column)."""
         import openpyxl
 
         rows = list(openpyxl.load_workbook(path, read_only=True, data_only=True)[sheet].iter_rows(values_only=True))
-        header = [str(h) for h in rows[0]]
+        header = ["" if h is None else str(h) for h in rows[0]]
         if date_column not in header:
             raise DataError(f"no column {date_column!r} in sheet {sheet!r}; columns: {header}")
         d = header.index(date_column)
@@ -69,6 +70,10 @@ class Dataset:
         start = self.dates.index(first) if first else 0
         stop = self.dates.index(last) + 1 if last else len(self.dates)
         return Dataset(self.dates[start:stop], {k: v[start:stop] for k, v in self.series.items()})
+
+    def demeaned(self) -> "Dataset":
+        """Each series minus its mean over the values present (as Dynare's `prefilter=1` does with the estimation sample)."""
+        return Dataset(self.dates, {k: v - np.nanmean(v) for k, v in self.series.items()})
 
     def write_csv(self, path: str | Path) -> None:
         with open(path, "w", newline="") as handle:

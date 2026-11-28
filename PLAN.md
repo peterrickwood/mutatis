@@ -206,6 +206,23 @@ Run first, before building: compare the base model's printed equations (RDP 2015
 
 Accepted when: both published models are reproduced and the step from one to the other is a list of edits.
 
+**Status (2026-11-27): the gate has been run and the housing model imported; the rest waits on three decisions.**
+- The gate (`docs/design/stage4-gate.md`): of the base paper's 45 printed model equations, 24 are unchanged in the housing
+  model's code, 2 differ only by misprints in the paper, 6 gain housing terms, 11 changed for reasons that have nothing to do
+  with housing, and 3 changed only in ways that do nothing at the published values. The 11 are revisions of the base that came
+  in the same paper: sticky wages, price indexation, a different foreign block, policy rule, interest parity, productivity
+  process and current-account ratio, and weights in the hours aggregate. The housing paper says it compared against "a
+  modified version of RSH" with the first three. Read literally the gate trips, but it counts two steps as one: the housing
+  step itself reaches the rest of the model only through sums over the lists of sectors, so ports and set edits look enough
+  for it (moderate to high confidence). The base paper's appendix also leaves out at least six equations of its model.
+- Done: the housing model imported from the authors' own Dynare code, its log-likelihood and log prior density equal to
+  Dynare's at the published posterior mode (decision 54).
+- To decide before going on: (1) which base model to reproduce, and so what the edit list goes between; (2) whether the steady
+  state and calibration targets become part of a specification (adding housing moves dozens of computed coefficients
+  throughout the model; as plain numbers, the expansion must overwrite them all); (3) how a block replacement may take inputs
+  the block it replaces did not have (the housing instances need extra inputs and their own shock, which `replace_block`
+  refuses).
+
 ### Stage 5: a block estimated from microdata (demonstration 4)
 
 Adds: *isolate*; data links to data on individual households or firms; posting estimates back as priors; the registry of named JAX blocks.

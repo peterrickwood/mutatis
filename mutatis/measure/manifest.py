@@ -9,7 +9,9 @@ A manifest is a small YAML file:
       sheet: Data                # for a spreadsheet; omit for CSV
       date_column: Date
       first_date: 1983Q1         # for a CSV file with no date column: its rows are consecutive quarters from this one
+      date_column: ""            # (a date column with an empty heading)
     sample: {first: 1984Q1, last: 2019Q4}
+    demean: true                 # optional: subtract each series' mean over the sample (Dynare's prefilter=1)
     attribution: who made the data, and on what terms
 
 `load_manifest` downloads the file once into a cache outside the repository (~/.cache/mutatis, or $MUTATIS_CACHE), checks the
@@ -66,4 +68,5 @@ def load_manifest(path: str | Path) -> Dataset:
         scratch.write_bytes(raw)
         dataset = Dataset.read_csv(scratch, source.get("first_date"))
     sample = manifest.get("sample", {})
-    return dataset.between(sample.get("first"), sample.get("last"))
+    dataset = dataset.between(sample.get("first"), sample.get("last"))
+    return dataset.demeaned() if manifest.get("demean", False) else dataset

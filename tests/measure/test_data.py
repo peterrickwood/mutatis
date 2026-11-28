@@ -83,3 +83,30 @@ sample: {{first: 1999Q2, last: 1999Q3}}
     (tmp_path / "manifest.yaml").write_text((tmp_path / "manifest.yaml").read_text().replace("0" * 64, '"' + "1" * 63 + 'a"'))
     with pytest.raises(DataError, match="checksum"):
         manifest.load_manifest(tmp_path / "manifest.yaml")
+
+
+def test_an_unnamed_date_column_and_demeaning_over_the_sample(tmp_path, monkeypatch):
+    """Dynare's data sheets often leave the date column's heading empty; `prefilter=1` demeans each series over the estimation
+    sample, using the values present."""
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Input"
+    for row in [(None, "a", "b"), ("1999Q1", 1.0, "#N/A"), ("1999Q2", 2.0, 4.0), ("1999Q3", 3.0, 8.0), ("1999Q4", 10.0, 9.0)]:
+        sheet.append(row)
+    book.save(tmp_path / "data.xlsx")
+    data = Dataset.read_excel(tmp_path / "data.xlsx", "Input", "")
+    assert data.dates[0] == "1999Q1" and np.isnan(data.series["b"][0])
+    checksum = hashlib.sha256((tmp_path / "data.xlsx").read_bytes()).hexdigest()
+    monkeypatch.setenv("MUTATIS_CACHE", str(tmp_path / "cache"))
+    (tmp_path / "manifest.yaml").write_text(f"""
+source: {{url: {(tmp_path / 'data.xlsx').as_uri()}, sha256: "{checksum}", sheet: Input, date_column: ""}}
+sample: {{first: 1999Q1, last: 1999Q3}}
+demean: true
+""")
+    data = manifest.load_manifest(tmp_path / "manifest.yaml")
+    np.testing.assert_allclose(data.series["a"], [-1.0, 0.0, 1.0])
+    assert np.isnan(data.series["b"][0])
+    np.testing.assert_allclose(data.series["b"][1:], [-2.0, 2.0])
+

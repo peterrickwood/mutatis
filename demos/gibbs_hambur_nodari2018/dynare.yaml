@@ -1,0 +1,10 @@
+# The model of Gibbs, Hambur and Nodari (2018), "DSGE Reno: Adding a Housing Block to a Small Open Economy Model", RBA Research
+# Discussion Paper 2018-04, imported from the authors' own Dynare code through Dynare's preprocessor (mutatis.io.dynare,
+# import_dynare_source). The code computes its steady state, and with it 31 parameter values, in MATLAB once at the calibrated
+# values and then holds them fixed; those values are taken from the authors' stored results.
+name: gibbs_hambur_nodari2018
+source:
+  url: https://www.rba.gov.au/publications/rdp/2018/2018-04/rdp-2018-04-supplementary-information.zip
+  sha256: "31ec3322b868b0afe41528226894ce299c61f39b8a1e3f70a3704ca885abff64"
+  member: Domestic Sector/multisector.mod
+values: Domestic Sector/multisector_results.mat
