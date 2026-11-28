@@ -567,3 +567,13 @@ singular in one direction, moves the log-likelihood by 1.4e-6. A small file with
 written by hand, to 1e-14 (fast tier). The stored run used 99 quarters, 1992Q2 to 2016Q4, not the paper's 1992Q1 start. Not
 yet: the steady state and calibration as part of a specification (the values are taken as computed); the model written as
 blocks, and the step from the base model; estimation at this size (parked item 3).
+
+**55. The root finder's derivative is our own implicit-function rule, so that a failed steady-state search stays a status.**
+Optimistix's own rule raised an error ("a linear solver received non-finite input") when a gradient passed through a search
+that had run off to values that are not finite, or whose root had a Jacobian that is not finite: the real business cycle toy at
+a capital share of 0.98 or more, which prior draws reach, stopped SMC and NUTS (found while building stage 3). Now
+`mutatis.numerics.rootfind.find_root` treats a root or Jacobian that is not finite as a failure: the status is NOT_CONVERGED,
+the value is a finite stand-in (the start, with entries that are not finite set to zero), and the derivative, dx = -J^-1
+(d fn / d args) dargs, is zero there. Downstream, the log-likelihood is minus infinity and its gradient not finite, which the
+samplers already treat as a rejected move. Checked: first and second derivatives of a root against the closed form; a failed
+search, alone and batched, gives a zero derivative without raising; SMC now runs on the real business cycle toy.

@@ -55,3 +55,23 @@ def test_long_simulation_settles_at_the_stationary_covariance():
     batches = np.array([np.cov(chunk.T) for chunk in np.array_split(path, 100)])
     standard_error = batches.std(axis=0, ddof=1) / np.sqrt(len(batches))
     np.testing.assert_array_less(np.abs(batches.mean(axis=0) - np.asarray(X)), 5 * standard_error)
+
+
+def test_second_derivative_of_a_root():
+    """Derivatives of the root pass through the implicit function theorem at every order: x = sqrt(a)."""
+    root = lambda a: find_root(lambda x, a: x**2 - a, jnp.array(1.0), a)[0]
+    np.testing.assert_allclose(jax.hessian(root)(2.0), -0.25 * 2.0**-1.5, rtol=1e-9)
+    np.testing.assert_allclose(jax.jacfwd(jax.grad(root))(2.0), -0.25 * 2.0**-1.5, rtol=1e-9)
+
+
+def test_a_failed_search_has_a_finite_stand_in_and_a_zero_derivative():
+    """Where the search fails or the root is not finite, the status says so; the value is the start (non-finite entries as 0) and
+    its derivative is zero, so a sampler's gradient through it does not raise (it once did, inside Optimistix's own rule)."""
+    fn = lambda x, a: jnp.exp(x) - a          # no root for a <= 0: Newton runs off to minus infinity
+    value, status = find_root(fn, jnp.array(1.0), -1.0)
+    assert int(status) == Status.NOT_CONVERGED and float(value) == 1.0
+    assert float(jax.grad(lambda a: find_root(fn, jnp.array(1.0), a)[0])(-1.0)) == 0.0
+    value, status = find_root(lambda x, a: x**2 - a, jnp.array([jnp.inf, 2.0]), 4.0)
+    assert int(status) == Status.NOT_CONVERGED and np.all(np.asarray(value) == [0.0, 2.0])
+    grads = jax.vmap(jax.grad(lambda a: find_root(fn, jnp.array(1.0), a)[0]))(jnp.array([2.0, -1.0]))
+    np.testing.assert_allclose(grads, [0.5, 0.0], rtol=1e-10)
