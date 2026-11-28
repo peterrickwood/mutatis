@@ -126,6 +126,18 @@ class System:
     def fixed_parameters(self) -> dict:
         return {k: p.fixed_value for k, p in self.parameters.items() if p.spec.fixed is not None}
 
+    def equation_rows(self) -> dict[str, np.ndarray]:
+        """The rows of `residual` that belong to each block (lag copies are the block "auxiliary"), from the equations' shapes."""
+        n, k, m = self.n_variables, len(self.shock_labels), len(self.outside_labels)
+        params = {key: jax.ShapeDtypeStruct(info.shape, jnp.float64) for key, info in self.parameters.items()}
+        sizes = [math.prod(jax.eval_shape(lambda p, e=e: evaluate(e.expr, self.layout, Values(jnp.zeros(n), jnp.zeros(n), jnp.zeros(n), jnp.zeros(k), jnp.zeros(m), p)), params).shape)
+                 for e in self.equations]
+        rows, start = {}, 0
+        for equation, size in zip(self.equations, sizes):
+            rows.setdefault(equation.block, []).extend(range(start, start + size))
+            start += size
+        return {block: np.asarray(r, dtype=int) for block, r in rows.items()}
+
     @property
     def n_variables(self) -> int:
         return len(self.variable_labels)

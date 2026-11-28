@@ -270,6 +270,23 @@ def _identity_label(expr: Expr, system: System) -> str | None:
     return None
 
 
+def data_states(system: System, observed: np.ndarray, outside: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    """The state in every period the model explains, and in the period before, read from the data: (now, previous), each
+    (periods - presample, variables), NaN where a series is missing. None when some part of the state cannot be read from the
+    data (see `state_sources`)."""
+    sources = state_sources(system)
+    if sources is None:
+        return None
+    p, periods = system.presample, observed.shape[0]
+    rows = np.arange(p - 1, periods)
+    states = np.full((len(rows), len(sources)), np.nan)
+    for i, (kind, column, lag) in enumerate(sources):
+        index = rows - lag
+        present = index >= 0
+        states[present, i] = (observed if kind == "observed" else outside)[index[present], column]
+    return states[1:], states[:-1]
+
+
 def data_start(system: System, observed: np.ndarray, outside: np.ndarray) -> DataStart | None:
     sources = state_sources(system)
     if sources is None:

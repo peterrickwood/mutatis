@@ -11,6 +11,11 @@ vector u that gives it as mean + L u (see `_initial_from_standard`). Standard fo
 with the parameters, which matters: with the shocks themselves as unknowns, SMC returned confidently wrong posteriors (risk
 experiment 1, PLAN.md). Fixed parameters are constants. Parameters with no prior need the bounds route, which comes
 with the first demonstration.
+
+The specification's restrictions truncate the prior: the log prior is minus infinity wherever one fails, and `draw_prior` draws
+until all hold. Every sampler that uses the log prior therefore respects them; the exact regression formula applies them itself.
+The truncated prior is not renormalised, so a marginal likelihood computed with restrictions leaves out log P(restrictions hold
+under the prior).
 """
 
 import math
@@ -28,9 +33,13 @@ from mutatis.dist.domains import Domain, Real
 from mutatis.infer import routes
 from mutatis.measure.data import Arranged
 from mutatis.numerics.factor import cholesky_with_jitter
+from mutatis.quantities.expressions import Context, evaluate_quantity
 from mutatis.solve.contract import SolvedModel
+from mutatis.spec.expr import parse_expression, parse_requirement
 
 ROUTES = ("read_off", "kalman", "sample")
+_SIGN = {">=": 1.0, ">": 1.0, "<=": -1.0, "<": -1.0}
+MAX_PRIOR_TRIES = 10_000   # prior draws tried, one at a time, for one that satisfies the restrictions
 
 
 class ProblemError(ValueError):
@@ -72,21 +81,55 @@ class UnknownLayout:
 
 class PosteriorProblem:
     def __init__(self, system: System, solve: Callable[[dict], SolvedModel], data: Arranged, route: str, start: str, layout: UnknownLayout,
-                 observed, outside, start_state):
+                 observed, outside, start_state, apply_restrictions: bool = True):
         self.system, self.solve, self.data, self.route, self.start, self.layout = system, solve, data, route, start, layout
         self.observed, self.outside, self.start_state = observed, outside, start_state
+        self.apply_restrictions = apply_restrictions
         self.parameter_unknowns = tuple(u for u in layout.unknowns if u.prior is not None)
         self.no_prior_unknowns = tuple(u for u in layout.unknowns if u.no_prior)
         self.proper = all(u.prior.proper for u in self.parameter_unknowns) and not self.no_prior_unknowns
+        self.restrictions = []
+        for name, quantity, require in (system.restrictions if apply_restrictions else ()):
+            op, bound = parse_requirement(require)
+            if op not in _SIGN:
+                raise ProblemError(f"restriction {name}: only inequalities are supported so far, not {op!r}")
+            self.restrictions.append((parse_expression(quantity), _SIGN[op], bound))
+        first = data.start.first if start == "data" else 0
+        self.series = {o.series: jnp.asarray(data.observed[first:, i]) for i, o in enumerate(system.observations)}
+        self.series.update({name: jnp.asarray(values[first:]) for name, values in data.auxiliary.items()})
         self.gradient_ready = all(u.domain.has_transform for u in layout.unknowns) and not self.no_prior_unknowns
 
     @property
     def size(self) -> int:
         return self.layout.size
 
+    def with_fixed(self, values: dict, apply_restrictions: bool = True) -> "PosteriorProblem":
+        """The same problem with some unknowns held at given values (and, optionally, its restrictions not applied)."""
+        unknowns, offset = [], 0
+        for u in self.layout.unknowns:
+            if u.name not in values:
+                unknowns.append(Unknown(u.name, u.shape, u.domain, u.prior, offset, u.size, u.no_prior))
+                offset += u.size
+        layout = UnknownLayout(tuple(unknowns), {**self.layout.fixed, **{k: jnp.asarray(v) for k, v in values.items()}})
+        return PosteriorProblem(self.system, self.solve, self.data, self.route, self.start, layout, self.observed, self.outside, self.start_state,
+                                apply_restrictions)
+
     def parameters(self, z) -> dict:
         values, _ = self.layout.constrain(z)
         return {k: v for k, v in values.items() if k in self.system.parameters}
+
+    def context(self, values: dict, solved: SolvedModel | None = None) -> Context:
+        """What a quantity needs, for given values of the unknowns (the model is solved unless `solved` is given)."""
+        if solved is None:
+            solved = self.solve({k: v for k, v in values.items() if k in self.system.parameters})
+        return Context(self.system, solved, self.observed, self.outside, self.start_state, self.series)
+
+    def restriction_values(self, values: dict, solved: SolvedModel | None = None) -> jax.Array:
+        """Every restriction of the specification as one flat vector, >= 0 where the restriction holds."""
+        if not self.restrictions:
+            return jnp.zeros(0)
+        ctx = self.context(values, solved)
+        return jnp.concatenate([sign * (jnp.ravel(evaluate_quantity(q, ctx)) - evaluate_quantity(b, ctx)) for q, sign, b in self.restrictions])
 
     def log_densities(self, z) -> tuple[jax.Array, jax.Array]:
         """(log prior, log likelihood) at z, solving the model once."""
@@ -111,6 +154,8 @@ class PosteriorProblem:
             log_likelihood = routes.kalman(solved, self.observed, self.outside, None if self.start == "model" else self.start_state)
         else:
             log_likelihood = routes.read_off(solved, self.observed, self.outside, self.start_state)
+        if self.restrictions:
+            log_prior = jnp.where(jnp.all(self.restriction_values(values, solved) >= 0), log_prior, -jnp.inf)
         log_prior = jnp.where(jnp.isfinite(log_prior), log_prior, -jnp.inf)
         return log_prior, log_likelihood
 
@@ -125,7 +170,27 @@ class PosteriorProblem:
         return log_prior + log_likelihood
 
     def draw_prior(self, key) -> jax.Array:
-        """One draw of z from the prior. Every prior must be proper."""
+        """One draw of z from the prior, truncated by the restrictions: prior draws until one satisfies them all (at most
+        MAX_PRIOR_TRIES; after that the last draw is returned, and its log prior is minus infinity). Every prior must be proper."""
+        if not self.restrictions:
+            return self._draw_prior(key)
+
+        def allowed(z):
+            values, _ = self.layout.constrain(z)
+            return jnp.all(self.restriction_values(values) >= 0)
+
+        def body(state):
+            key, z, ok, tries = state
+            key, sub = jax.random.split(key)
+            candidate = self._draw_prior(sub)
+            return key, jnp.where(ok, z, candidate), ok | allowed(candidate), tries + 1
+
+        key, first = jax.random.split(key)
+        z = self._draw_prior(first)
+        _, z, _, _ = jax.lax.while_loop(lambda s: ~s[2] & (s[3] < MAX_PRIOR_TRIES), body, (key, z, allowed(z), 1))
+        return z
+
+    def _draw_prior(self, key) -> jax.Array:
         if not self.proper:
             raise ProblemError("cannot draw from an improper prior (flat or jeffreys) or from a parameter with no prior; use the exact formula instead")
         values = dict(self.layout.fixed)

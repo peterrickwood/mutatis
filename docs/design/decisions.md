@@ -153,7 +153,8 @@ flagged on 2026-11-25 as out of date after the plan changed the contract, and ha
 to decide, document and move on.
 
 **32. Stage 1's test for range results requires our bounds to be exact, not to match Read's published range statistics; this
-changes PLAN.md's acceptance criterion for ranges and needs confirmation.** Evidence (`experiments/read2022_differences.py`):
+changes PLAN.md's acceptance criterion for ranges (confirmed in discussion 2026-11-27: exact bounds; where Read's are found by
+random rotations, as for Restriction (6), ours must contain his).** Evidence (`experiments/read2022_differences.py`):
 under Restriction (2), on 15 posterior draws and 6 horizons, an independent optimiser never found an allowed value outside our
 bounds (largest gap 1.8e-11), while Read's published lower ends at restricted horizons are about 0 where the exact bounds are
 clearly positive (0.276 in one draw for the exchange rate at horizon 2). Since his range numbers are not the exact bounds, they
@@ -425,6 +426,70 @@ normal (`reference="fitted"`). Alternatives: decision 42's rule with divergent t
 (not tried; it would switch it on for the sampled-shocks model too, where the ladder takes about 4 times as long); a ladder
 always without the search (decision 41).
 
+**44. The exact regression formula works block by block, each block with its own sample (agreed in discussion 2026-11-27, for
+Read's Restriction (6)).** `mutatis.infer.regression` reads each block's errors from its own equations at the data, with its
+shocks set to zero, instead of from the solved model's one-step-ahead errors. Conditions, each checked numerically on the model:
+every variable can be read from the data; within a block the errors are linear in coefficients with flat priors and every
+equation uses the same regressors; each block's errors have a covariance parameter of their own (Jeffreys or inverse Wishart)
+and are independent of other blocks'; each block's equations give its outputs one for one, and no blocks depend on each other's
+current values in a circle (so the change of variables from errors to data has a Jacobian of one); anything else leaves the
+likelihood unchanged. A block uses the periods in which every value it needs is present; a variable with missing values must be
+an output of one block, used by it only in the current period and by no other block, so that leaving out that block's periods
+drops exactly the missing values' densities. A VAR is the one-block case (all earlier tests unchanged). Checked: with a series
+missing in 40 of 159 periods, the product of the block densities equals the Kalman filter's likelihood of the whole model to
+1e-8, for a VAR with a survey block and for a chain of two single-equation blocks (MARTIN's kind of model); for Read's model the
+VAR block (140 quarters, 32 regressors) and the proxy block (1994Q1 to 2018Q4, 100 quarters, 36 regressors) match his own
+construction to 1e-12. The same mechanism is meant for *isolate* (stage 5) and MARTIN's equation-by-equation estimation
+(stage 6). Alternative: a special path for a first-stage regression, rejected as model-specific.
+
+**45. Ranges whose restrictions involve several columns of the rotation come from a search over rotations.** When the exact
+one-column method does not apply, `mutatis.infer.identification.rotation_bounds` finds each bound by a log-barrier method with
+Newton steps on the rotations themselves (local coordinates Q cayley(theta), re-centred after each step; positive curvature has
+its sign flipped), from the best few of 20,000 random rotations that satisfy the restrictions, or, if none does, from a first
+phase that maximises the smallest restriction value. Restrictions and quantities linear in the rotation (every SVAR restriction
+met so far) are fitted as matrices per draw, so the search is compiled once. Checked against the exact one-column method where
+both apply (agreement to 2e-12, never outside), against an exact reduction of Read's proxy restrictions to a convex problem in
+the first column (an orthonormal completion with |a'q_j| <= a'q_1 exists exactly when a'q_1 >= |a| / sqrt(n)), including which
+sets are empty, and on a set holding about one rotation in a million (found by the first phase). It replaces the earlier
+SLSQP prototype (`optimised_bounds`), which used the matrix exponential and recompiled for every call. A bound can still be
+missed where every start leads to a lower local best, and on Restriction (6) it was (decision 53 adds a second search); an
+allowed set too small for the search is reported as empty.
+
+**46. Read's published results for Restriction (6) come from replication code that pairs the proxy with the wrong quarters; the
+demonstration follows the paper, and the stage 1 test reproduces his figure by giving the same pairing as data.** In
+`mainfile_proxy.m` the proxy is first shortened to its 100 values (`proxy = proxy(~isnan(proxy))`), and the next line selects
+the VAR's rows with `YY(~isnan(proxy),:)`: a mask of 100 true values, which MATLAB applies to the first 100 of the 140 rows. So
+the first-stage regression pairs the proxy for 1994Q1-2018Q4 with the VAR's values for 1985Q1-2009Q4, 36 quarters earlier. The
+paper describes the aligned regression ("use the sample over which the proxy is available to estimate the first-stage
+regression"). Evidence: a line-by-line NumPy port of his code (`mainfile_proxy.m`, `drawQ0.m`, `genVMA.m`; a scratch script,
+not kept), 400 draws: aligned, plausibility 0.83 and impact responses cash rate 0.28, GDP -0.20, TWI 2.42, as our model gives
+(0.876; 0.287, -0.195, 2.40); misaligned, plausibility 0.40 (20,000 rotations per draw) and cash rate 0.16, 0.21, 0.20, 0.23 at
+horizons 0 to 3, GDP -0.16 and -0.31 at 0 and 8, against his figure's 0.15, 0.19, 0.20, 0.23 and -0.14, -0.30, and the paper's
+plausibility of "around 45 per cent". Through the generic path, with the proxy moved 36 quarters earlier in the data (the same
+pairing), all 252 conventional statistics of his figure 6 agree within sampling error and the plausibility is 0.454; aligned,
+101 of 252 disagree. The model in `demos/read2022/edits/restriction6.yaml` pairs them as the paper describes; the test gives
+the published pairing as data, so it checks that our machinery reproduces his published numbers. Fewer rotation tries per draw
+were ruled out as the cause first: they lower the plausibility (0.45 at about 70 tries) but leave the responses unchanged.
+
+**47. A specification's restrictions truncate the prior, in every sampler.** Until now only the exact regression formula applied
+restrictions (to the unknowns the likelihood ignores); every other sampler silently ignored them, and so did the formula for a
+model without such unknowns. Now the posterior problem evaluates them (`PosteriorProblem.restriction_values`): the log prior is
+minus infinity wherever one fails, `draw_prior` draws until all hold (at most 10,000 tries per draw), and the regression formula
+drops the draws that break restrictions on what it estimates. The ranges step uses the same evaluation. The truncated prior is
+not renormalised, so a marginal likelihood computed with restrictions leaves out log P(restrictions hold under the prior).
+Checked on the forward-looking toy with a restriction on the price's response (`tests/infer/test_restrictions.py`): the log prior
+is unchanged where it holds and minus infinity elsewhere, prior draws follow the truncated prior, and by SMC the restricted
+posterior is the plain posterior cut down (medium tier); and on a VAR whose restriction involves only its coefficients.
+Alternative: refusing to run when a sampler cannot apply restrictions (safe, but leaves restricted models without a sampler).
+
+**48. Ranges with any sampler (agreed in discussion 2026-11-27).** For a model the exact regression formula does not cover,
+whose only unknown without a prior is a rotation the likelihood ignores (checked at prior draws), and whose other unknowns have
+proper priors: those are sampled by the chosen sampler with the rotation held fixed and the restrictions left out, and for each
+of `n_draws` posterior draws the ranges are computed as the formula computes them (`mutatis.infer.restricted.ranges_posterior`;
+`estimate()` routes there). Checked on a forward-looking model whose two shocks are mixed by a rotation with no prior: the
+bounds of the price's response equal the closed form rho^h sqrt(S11) / (1 - a rho) and 0 at every draw, to 1e-9. Ranges over
+unknowns that are not rotations remain unsupported.
+
 **49. Stage 2's textbook model is Herbst and Schorfheide's small New Keynesian model (agreed in discussion 2026-11-27).**
 `demos/herbst_schorfheide2016`: the model of "Bayesian Estimation of DSGE Models" (Princeton University Press, 2016), chapters
 1.1 and 4, written from the book's equations and the authors' public code (none of their files is copied), with their data
@@ -464,3 +529,22 @@ period, auxiliary variables, shocks given by variances or correlations, shifted 
 **52. Two smaller additions for stage 2.** The prior family `inverse_gamma_sd(s, nu)`, a standard deviation whose square is
 inverse gamma (Schorfheide's IG(s, nu), Dynare's `inv_gamma_pdf`), tested against SciPy and the authors' formula; and data
 manifests for CSV files with no date column (`first_date`: rows are consecutive quarters from it).
+
+**53. The search over rotations also treats the restrictions as a penalty that hardens step by step (agreed in discussion
+2026-11-27).** On Restriction (6) the barrier search of decision 45 fell short of the exact bound on 25 of 504 bounds (3
+posterior draws, 84 responses, both ends), by up to 11% of the range's width. There the extreme lies where every proxy
+restriction binds at once (a'q1 = |a| / 2), and a barrier, which keeps every step allowed, pushes the search away from such
+places: all 232 allowed starts of one draw ended at the same lower local best. (Read's own method for this set, the smallest and
+largest response over 5,000 random allowed rotations, falls short by 10% of the width on average; his paper's Appendix A.2 says
+it is too narrow.) `rotation_bounds` now also runs a softened search from 16 random rotations per bound, allowed or not
+(`_soften`): the restrictions become a penalty, half the sum of squares of each one's shortfall below a margin of 1e-6 (in units
+of its spread over random rotations); the quantity is divided by a weight that rises from 1 to 10^8 in nine stages; the steps
+are decision 45's Newton steps on rotations (`_newton_on_rotations`, now shared by both searches). The end point, inside every
+restriction by about the margin, is finished by the barrier search with a small barrier, so every reported bound is attained at
+an allowed rotation. For each bound the more extreme allowed result of the two searches is reported. Evidence (scratch
+experiments, not kept): on the 504 bounds, SLSQP over whole rotations from 20 random starts fell short on 2 and the softened
+search (BFGS, then SLSQP) on none, 94% of its starts reaching the exact bound (68% on the 25 hard ones); the built-in version
+falls short on none (largest gap 4.5e-11 of the width). Tests: two random cases with proxy restrictions where the barrier search
+alone falls short by more than 1e-3 now match the exact reduction to 1e-8. Alternatives, rejected in discussion: an exact rule
+for proxy restrictions (specific to one kind of restriction), and accepting bounds that may be too narrow (they understate
+uncertainty without saying so). Parked item 4 reviews the optimisation methods together.

@@ -72,12 +72,25 @@ Questions raised in discussion and set aside, to come back to. When one is settl
      held-out check, the Inference Gym targets in the long suite (all four main methods, 4 seeds, including the 2,519-unknown
      stochastic volatility model).
 
-3. **Range acceptance criterion for Read (2022) (decision 32, raised 2026-11-26).** Stage 1's test requires our range
-   bounds to be exact rather than to match Read's published numbers, because his are not always exact (decision 28). This
-   changes the plan's acceptance criterion and needs confirmation.
-
-4. **Computing power for DSGE-sized estimation (raised 2026-11-26).** At 50 states one likelihood gradient costs about 21 ms
+3. **Computing power for DSGE-sized estimation (raised 2026-11-26).** At 50 states one likelihood gradient costs about 21 ms
    per particle on this machine's CPU, so an SMC run on a DSGE of that size would take hours. Options to weigh before
    stage 4: a GPU, fewer particles or moves, a cheaper filter (see decision 39), or accepting overnight runs.
+
+4. **The optimisation methods and workarounds now in the code, to review together (raised 2026-11-27).** Several searches
+   and fixes have been added one problem at a time. To go through them as a whole: which are general mechanisms and which
+   are fixes for one case, which could be merged, and whether there should be one optimisation layer that they all use.
+   What is in place as of 2026-11-27:
+   - Ranges over a rotation: the exact one-column method, for restrictions on one column only; the general search
+     (decision 45): Newton steps on rotations through the Cayley map, with a barrier that keeps every step allowed, started
+     from the best few of 20,000 random allowed rotations, with negative-curvature fixes and a first phase when no random
+     rotation is allowed; restrictions that are linear in the rotation fitted as matrices so the search compiles once; and
+     the softened search (decision 53), which treats the restrictions as a penalty, hardens it step by step from random
+     starts, then makes the answer exactly allowed. The bound reported is the more extreme of the searches' results that
+     passes the exact check. Found by experiment on Restriction (6): the barrier search alone stopped short on 25 of 504
+     bounds, SLSQP over whole rotations on 2, the softened search on none.
+   - Rejection draws of rotations, screened with the fitted matrices before the exact check.
+   - The default sampler's peak search and ladder (decisions 42 and 43; item 2 above).
+   - Newton's method for the steady state, from the values the specification gives (decision 50).
+   - The forward-looking solve's iteration and its count of roots (item 1 above).
 
 Also deferred, recorded elsewhere: the written report on the replication of Read (2022) (PLAN.md, end of stage 1).

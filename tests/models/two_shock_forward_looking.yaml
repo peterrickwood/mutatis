@@ -1,0 +1,36 @@
+# Two demand drivers whose shocks are mixed by a rotation, and a price that looks ahead: p = x[d1] / (1 - a rho). Normal shocks
+# make the data's density the same for every rotation, so with no prior on Q its effects can only be given as ranges.
+model: two-shock-forward-looking
+time: quarterly
+expectations: rational
+sets:
+  drivers: [d1, d2]
+  shocks: [s1, s2]
+
+blocks:
+  demand:
+    outputs: ["x[drivers]"]
+    parameters:
+      rho: {prior: "beta(mean=0.6, sd=0.1)"}
+      S:   {shape: [drivers, drivers], domain: positive_definite, prior: "inverse_wishart(df=6, scale=identity)"}
+      Q:   {shape: [drivers, shocks], domain: orthogonal, prior: uniform}
+    shocks:
+      "e[shocks]": "normal(0, 1)"
+    equations:
+      - "x = rho * x(-1) + chol(S) @ Q @ e"
+
+  price:
+    inputs: ["x[drivers]"]
+    outputs: [p]
+    parameters:
+      a: {prior: "beta(mean=0.5, sd=0.1)"}
+    equations:
+      - "p = x[d1] + a * E(p(+1))"
+
+data:
+  X1: {observes: "x[d1]", error: "normal(0, 0.1)"}
+  X2: {observes: "x[d2]", error: "normal(0, 0.1)"}
+  P:  {observes: p, error: "normal(0, 0.1)"}
+
+restrictions:
+  first_driver_rises: {quantity: "response(x[d1], e[s1], horizons=0)", require: ">= 0"}

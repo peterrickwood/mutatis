@@ -16,6 +16,7 @@ from tests.spec.fixtures import toy
 
 PARAMS = {
     "hidden_level": {"level.sigma_eta": 0.3, "y.sigma_eps": 0.5},
+    "hidden_level_outside": {"level.beta": 0.7, "level.sigma_eta": 0.3, "y.sigma_eps": 0.5},
     "forward_looking": {"demand.rho": 0.8, "demand.sigma_x": 0.7, "price.a": 0.5},
     "two_variable": {"dynamics.c": [0.1, -0.2], "dynamics.B": [[0.5, 0.1], [0.0, 0.3]], "dynamics.Sigma": [[1.0, 0.3], [0.3, 0.5]]},
     "error_correction": {"spending.alpha0": 0.1, "spending.gamma": -0.2, "spending.beta1": 0.9, "spending.alpha1": 0.3, "spending.sigma": 0.4},
@@ -81,6 +82,19 @@ def test_error_correction_read_off_equals_direct_calculation():
     np.testing.assert_allclose(problem.log_likelihood(theta(problem, params)), ss.norm(0, p["sigma"]).logpdf(errors).sum(), rtol=1e-10)
     kalman = build_problem(system, solve, data, route="kalman", start="data")
     np.testing.assert_allclose(kalman.log_likelihood(theta(kalman, params)), ss.norm(0, p["sigma"]).logpdf(errors).sum(), rtol=1e-10)
+
+
+def test_an_outside_variable_feeds_the_hidden_level():
+    """Outside variables (stage 1, built for the VAR) in a state-space model: mu = mu(-1) + beta z + eta, seen with noise. The
+    Kalman likelihood must equal the likelihood of all the data as one normal vector: mean beta times the running sum of z,
+    covariance 100 + sigma_eta^2 min(s, t) + sigma_eps^2 on the diagonal (mu starts as normal(0, 10))."""
+    _, system, params, solve, data = setup("hidden_level_outside", n_periods=25)
+    problem = build_problem(system, solve, data, route="kalman", start="model")
+    z, y = data.outside[:, 0], data.observed[:, 0]
+    t = np.arange(1, len(y) + 1)
+    cov = 100.0 + 0.3**2 * np.minimum.outer(t, t) + 0.5**2 * np.eye(len(y))
+    expected = ss.multivariate_normal(0.7 * np.cumsum(z), cov).logpdf(y)
+    np.testing.assert_allclose(float(problem.log_likelihood(theta(problem, params))), expected, rtol=1e-10)
 
 
 @pytest.mark.medium

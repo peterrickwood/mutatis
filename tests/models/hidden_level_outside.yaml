@@ -1,0 +1,25 @@
+# The hidden level, pushed each quarter by an outside variable that comes from data: an outside variable in a state-space model.
+model: hidden-level-outside
+time: quarterly
+
+blocks:
+  level:
+    inputs: [z]
+    outputs: [mu]
+    parameters:
+      beta:      {prior: "normal(0, 1)"}
+      sigma_eta: {prior: "half_normal(scale=1)"}
+    shocks:
+      eta: "normal(0, sigma_eta)"
+    initial:
+      mu: "normal(0, 10)"
+    equations:
+      - "mu = mu(-1) + beta * z + eta"
+
+data:
+  y:
+    observes: mu
+    error: "normal(0, sigma_eps)"
+    parameters:
+      sigma_eps: {prior: "half_normal(scale=1)"}
+  Z: {feeds: z}
