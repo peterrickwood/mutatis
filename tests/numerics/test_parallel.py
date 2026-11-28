@@ -17,7 +17,9 @@ def _step(x, total, k):
 
 
 def _program():
-    return compile_program(_step, np.zeros(3), np.float64(0), np.float64(0))
+    # Programs sent to worker processes are compiled afresh, as compile_program requires (and the samplers do): the tests' own
+    # compilation cache (tests/conftest.py) would otherwise hand back a cached program that a worker cannot run.
+    return compile_program(_step, np.zeros(3), np.float64(0), np.float64(0), use_cache=False)
 
 
 def test_workers_and_this_process_run_a_compiled_program_alike():
@@ -62,7 +64,7 @@ def test_linear_algebra_runs_in_a_fresh_worker():
 
     a, b = np.arange(9.0).reshape(3, 3) / 10, np.ones(3)
     with Workers(usable_cpus()[:1]) as workers:
-        workers.load("solve", compile_program(solve, a, b))
+        workers.load("solve", compile_program(solve, a, b, use_cache=False))
         [(_, [outputs])] = workers.iterate("solve", [[]], [[[a, b]]], deadline=float("inf"))
     for got, expected in zip(outputs, jax.jit(solve)(a, b)):
         np.testing.assert_array_equal(got, np.asarray(expected))
